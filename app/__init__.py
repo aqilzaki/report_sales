@@ -1,23 +1,15 @@
 from flask import Flask
 from .config import Config
-from .models import db
-from .schemas import ma
+from .database import db, migrate
 
 def create_app():
-    """Application factory function."""
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # Inisialisasi ekstensi
     db.init_app(app)
-    ma.init_app(app)
+    migrate.init_app(app, db)
 
-    with app.app_context():
-        # Import routes
-        from . import routes
-        
-        # Buat semua tabel database jika belum ada
-        # Hapus atau beri komentar baris ini di lingkungan produksi
-        db.create_all() 
+    from .api import blueprint as api_bp
+    app.register_blueprint(api_bp)
 
-        return app
+    return app

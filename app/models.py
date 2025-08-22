@@ -1,11 +1,7 @@
-from flask_sqlalchemy import SQLAlchemy
+from .database import db
 
-db = SQLAlchemy()
-
-# Tabel-tabel berdasarkan ERD Anda dengan penambahan panjang string
 class Sales(db.Model):
     __tablename__ = 'sales'
-    # BERI PANJANG, contoh: 50 karakter
     id_mr = db.Column(db.String(50), primary_key=True)
     nama_mr = db.Column(db.String(100), nullable=False)
 
@@ -19,7 +15,7 @@ class Outlet(db.Model):
     id_tm = db.Column(db.String(50), primary_key=True)
     nama_tm = db.Column(db.String(100))
     id_kondisi_outlet = db.Column(db.String(50), db.ForeignKey('kondisi_outlet.id'))
-    lokasi = db.Column(db.String(255)) # Lokasi bisa lebih panjang
+    lokasi = db.Column(db.String(255))
     id_mr = db.Column(db.String(50), db.ForeignKey('sales.id_mr'))
     transaksi = db.Column(db.BigInteger)
 

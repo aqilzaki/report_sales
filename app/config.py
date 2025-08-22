@@ -1,11 +1,12 @@
 import os
 from dotenv import load_dotenv
 
-# Muat variabel dari file .env
 load_dotenv()
 
 class Config:
-    """Konfigurasi dasar aplikasi."""
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'kunci-rahasia-yang-sangat-sulit-ditebak')
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'you-will-never-guess')
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Konfigurasi untuk RESTx
+    RESTX_VALIDATE = True
+    RESTX_MASK_SWAGGER = False
