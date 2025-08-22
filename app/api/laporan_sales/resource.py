@@ -20,7 +20,7 @@ class LaporanSales(Resource):
         args = parser.parse_args()
         laporan = ctrl.get_laporan_sales(id_mr, args['bulan'], args['tahun'])
         if not laporan:
-            api.abort(404, f"Sales dengan ID '{id_mr}' tidak ditemukan.")
+            return {'message': f"Sales dengan ID '{id_mr}' tidak ditemukan."}, 404
         return laporan
     
 @api.route('/ping')
@@ -28,3 +28,16 @@ class Ping(Resource):
     def get(self):
         """Endpoint untuk memeriksa status API."""
         return {"message": "API is running"}, 200   
+    
+
+@api.route('/sales')
+class AllReportSales(Resource):
+    @api.expect(parser)
+    @api.marshal_with(_laporan_output)
+    def get(self):
+        """Mendapatkan laporan keuangan semua sales.""" 
+        args = parser.parse_args()
+        laporan = ctrl.all_report_sales(args['bulan'], args['tahun'])
+        if not laporan:
+             return {'message': 'Tidak ada laporan ditemukan untuk periode tersebut.'}, 404
+        return laporan
