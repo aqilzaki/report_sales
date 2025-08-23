@@ -5,8 +5,9 @@ from .models import Reseller, Transaksi
 import datetime
 import random
 import string
+import calendar
 
-# Fungsi untuk menghapus semua data yang ada (membersihkan tabel)
+
 def clear_data():
     meta = db.metadata
     for table in reversed(meta.sorted_tables):
@@ -15,19 +16,18 @@ def clear_data():
     db.session.commit()
     print('Semua data berhasil dihapus.')
 
-# Fungsi untuk generate kode random
+
 def generate_code(prefix, length=6):
     random_part = ''.join(random.choices(string.digits, k=length))
     return f"{prefix}{random_part}"
 
-# Fungsi utama untuk seeding
+
 def seed_data():
     print('Memulai proses seeding...')
     
-    # ---- 1. Buat Data Reseller ----
+    # ---- 1. Data Reseller (sama seperti sebelumnya) ----
     reseller_data = []
 
-    # Buat 3 MASTER reseller
     for i in range(1, 10):
         reseller_data.append(
             Reseller(
@@ -50,7 +50,7 @@ def seed_data():
             )
         )
 
-    # Buat 10 AGEN untuk setiap MASTER
+    # AGEN
     agen_counter = 1
     for master in reseller_data[:3]:
         for j in range(10):
@@ -77,7 +77,7 @@ def seed_data():
             )
             agen_counter += 1
 
-    # Buat 5 DEALER untuk setiap AGEN
+    # DEALER
     dealer_counter = 1
     agen_resellers = [r for r in reseller_data if r.kode_level == "AGEN"]
     for agen in agen_resellers:
@@ -108,7 +108,7 @@ def seed_data():
     db.session.bulk_save_objects(reseller_data)
     print(f'{len(reseller_data)} data Reseller ditambahkan.')
 
-    # ---- 2. Buat Data Transaksi ----
+    # ---- 2. Data Transaksi (khusus 1 bulan penuh) ----
     produk_list = [
         {'kode': 'TEL5', 'harga': 5500, 'harga_beli': 5000},
         {'kode': 'TEL10', 'harga': 10750, 'harga_beli': 10000},
@@ -126,17 +126,24 @@ def seed_data():
     reseller_codes = [r.kode for r in reseller_data]
 
     transaksi_data = []
-    start_date = datetime.datetime.now() - datetime.timedelta(days=365)  # setahun terakhir
-    end_date = datetime.datetime.now()
 
-    for i in range(5000):  # generate 5000 transaksi
+    # Tentukan bulan sekarang
+    today = datetime.date.today()
+    first_day = today.replace(day=1)
+    last_day = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+
+    num_trx = 3000  # total transaksi sebulan
+    for i in range(num_trx):
         produk = random.choice(produk_list)
         reseller_code = random.choice(reseller_codes)
         nomor_tujuan = random.choice(nomor_hp_list)
         status = random.choice(status_list)
-        random_date = start_date + datetime.timedelta(
-            seconds=random.randint(0, int((end_date - start_date).total_seconds()))
-        )
+
+        # pilih tanggal random dalam bulan ini
+        random_day = first_day + datetime.timedelta(days=random.randint(0, (last_day - first_day).days))
+        random_time = datetime.timedelta(seconds=random.randint(0, 86400))  # acak jam
+        random_date = datetime.datetime.combine(random_day, datetime.time()) + random_time
+
         saldo_awal = random.randint(1_000_000, 10_000_000)
         profit = produk['harga'] - produk['harga_beli']
         komisi = int(profit * 0.05)
@@ -168,16 +175,15 @@ def seed_data():
         )
 
     db.session.bulk_save_objects(transaksi_data)
-    print(f'{len(transaksi_data)} data Transaksi ditambahkan.')
+    print(f'{len(transaksi_data)} data Transaksi ditambahkan untuk bulan {today.strftime("%B %Y")}.')
 
     db.session.commit()
     print('Seeding selesai!')
 
 
-# Perintah kustom untuk CLI Flask
 @click.command('seed')
 @with_appcontext
 def seed_command():
-    """Menghapus data lama dan mengisi database dengan data dummy."""
+    """Menghapus data lama dan mengisi database dengan data dummy (1 bulan terakhir)."""
     clear_data()
     seed_data()
