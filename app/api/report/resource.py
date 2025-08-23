@@ -38,15 +38,20 @@ class ResellerSummaryCustomResource(Resource):
 class SelfSummaryResource(Resource):
     @api.marshal_with(ReportDto.self_summary_dto)
     def get(self):
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"message": "Token tidak ada"}, 401
+
+        token = auth_header.split(" ")[1]
+
         """Ambil ringkasan khusus untuk upline login (self only)"""
-        reseller_kode = request.args.get("kode")  # nanti bisa diambil dari JWT / session
         period = request.args.get("period", "month")
         year = request.args.get("year", type=int)
         month = request.args.get("month", type=int)
         day = request.args.get("day")
         week = request.args.get("week", type=int)
 
-        data = ctrl.get_self_summary(reseller_kode, period=period, year=year, month=month, day=day, week=week)
+        data = ctrl.get_self_summary(token, period=period, year=year, month=month, day=day, week=week)
         return data, 200
 
 

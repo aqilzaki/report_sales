@@ -1,9 +1,11 @@
 from app.models import Reseller, Transaksi
+import jwt
 from app.database import db
 from sqlalchemy import func, case
 from datetime import datetime, timedelta, date
+from flask import current_app
 import calendar
-
+from app.api.auth.controller import get_user_from_token
 
 def get_reseller_hierarchy_with_profit():
     """Ambil semua reseller root, cek downline, dan hitung profit per downline lalu akumulasi ke upline"""
@@ -146,63 +148,72 @@ def get_reseller_summary_custom(period="month", year=None, month=None, day=None,
 
     return hasil
 
-def get_self_summary(reseller_kode, period="month", year=None, month=None, day=None, week=None):
-    """Ringkasan transaksi untuk 1 upline saja (self)"""
-    start_dt, end_dt = _get_period_range(period, year, month, day, week)
+def get_self_summary(token, period="month", year=None, month=None, day=None, week=None):
+    try:
+        payload = jwt.decode(token, current_app.config["SECRET_KEY"], algorithms=["HS256"])
+        kode = payload["sub"]
+        user = Reseller.query.filter_by(kode=kode).first()
+     
 
-    root = Reseller.query.filter_by(kode=reseller_kode).first()
-    if not root:
-        return {"error": f"Reseller {reseller_kode} tidak ditemukan"}
+        
+        """Ringkasan transaksi untuk 1 upline saja (self)"""
+        start_dt, end_dt = _get_period_range(period, year, month, day, week)
 
-    downlines = Reseller.query.filter_by(kode_upline=root.kode).all()
-    downline_codes = [d.kode for d in downlines]
+        root = Reseller.query.filter_by(kode=kode).first()
+        if not root:
+            return {"error": f"Reseller {kode} tidak ditemukan"}
 
-    jmlh_trx = jmlh_trx_aktif = 0
-    total_omset = total_profit = 0.0
+        downlines = Reseller.query.filter_by(kode_upline=root.kode).all()
+        downline_codes = [d.kode for d in downlines]
 
-    if downline_codes:
-        base_filters = [
-            Transaksi.kode_reseller.in_(downline_codes),
-            Transaksi.tgl_entri >= start_dt,
-            Transaksi.tgl_entri <= end_dt,
-        ]
+        jmlh_trx = jmlh_trx_aktif = 0
+        total_omset = total_profit = 0.0
 
-        trx_summary = db.session.query(
-            func.count(Transaksi.kode).label("jumlah"),
-            func.sum(case((Transaksi.status == "SUCCESS", 1), else_=0)).label("jumlah_aktif"),
-            func.sum(Transaksi.harga).label("omset"),
-            func.sum(Transaksi.harga - Transaksi.harga_beli).label("profit"),
-        ).filter(*base_filters).first()
+        if downline_codes:
+            base_filters = [
+                Transaksi.kode_reseller.in_(downline_codes),
+                Transaksi.tgl_entri >= start_dt,
+                Transaksi.tgl_entri <= end_dt,
+            ]
 
-        jmlh_trx = int(trx_summary.jumlah or 0)
-        jmlh_trx_aktif = int(trx_summary.jumlah_aktif or 0)
-        total_omset = float(trx_summary.omset or 0)
-        total_profit = float(trx_summary.profit or 0)
+            trx_summary = db.session.query(
+                func.count(Transaksi.kode).label("jumlah"),
+                func.sum(case((Transaksi.status == "SUCCESS", 1), else_=0)).label("jumlah_aktif"),
+                func.sum(Transaksi.harga).label("omset"),
+                func.sum(Transaksi.harga - Transaksi.harga_beli).label("profit"),
+            ).filter(*base_filters).first()
 
-        akuisisi_aktif = db.session.query(
-            func.count(func.distinct(Transaksi.kode_reseller))
-        ).filter(*base_filters).scalar() or 0
-    else:
-        akuisisi_aktif = 0
+            jmlh_trx = int(trx_summary.jumlah or 0)
+            jmlh_trx_aktif = int(trx_summary.jumlah_aktif or 0)
+            total_omset = float(trx_summary.omset or 0)
+            total_profit = float(trx_summary.profit or 0)
 
-    akuisisi = len(downlines)
-    insentif = total_profit * 0.10
+            akuisisi_aktif = db.session.query(
+                func.count(func.distinct(Transaksi.kode_reseller))
+            ).filter(*base_filters).scalar() or 0
+        else:
+            akuisisi_aktif = 0
 
-    return {
-        "id_upline": root.kode,
-        "nama_upline": root.nama,
-        "periode": period,
-        "jmlh_trx": jmlh_trx,
-        "jmlh_trx_aktif": jmlh_trx_aktif,
-        "akuisisi": akuisisi,
-        "akuisisi_aktif": int(akuisisi_aktif),
-        "omset": total_omset,
-        "profit_upline": total_profit,
-        "insentif": insentif,
-        "start": start_dt.isoformat(timespec="seconds"),
-        "end": end_dt.isoformat(timespec="seconds"),
-    }
+        akuisisi = len(downlines)
+        insentif = total_profit * 0.10
 
+        return {
+            "id_upline": root.kode,
+            "nama_upline": root.nama,
+            "periode": period,
+            "jmlh_trx": jmlh_trx,
+            "jmlh_trx_aktif": jmlh_trx_aktif,
+            "akuisisi": akuisisi,
+            "akuisisi_aktif": int(akuisisi_aktif),
+            "omset": total_omset,
+            "profit_upline": total_profit,
+            "insentif": insentif,
+            "start": start_dt.isoformat(timespec="seconds"),
+            "end": end_dt.isoformat(timespec="seconds"),
+        }
+
+    except Exception:
+       return None
 
 def get_summary_by_week(year, month):
     """Ambil summary per minggu untuk semua upline"""
