@@ -1,18 +1,18 @@
-from flask import Flask
-from .config import Config
-from .database import db, migrate
+from flask import Blueprint
+from flask_restx import Api, Resource
 
-def create_app():
-    app = Flask(__name__)
-    app.config.from_object(Config)
+# SEMENTARA COMMENT DULU API LAMA SAMPAI KITA BUAT YANG BARU
+# from .laporan_sales.resource import api as laporan_ns
 
-    db.init_app(app)
-    migrate.init_app(app, db)
+blueprint = Blueprint('api', __name__, url_prefix='/v1')
+api = Api(blueprint, title='API Reseller Pulsa', version='1.0')
 
-    # Import models untuk memastikan mereka terdaftar dengan SQLAlchemy
-    from . import models
+# SEMENTARA COMMENT DULU SAMPAI KITA BUAT API BARU
+# api.add_namespace(laporan_ns, path='/laporan')
 
-    from .api import blueprint as api_bp
-    app.register_blueprint(api_bp)
-
-    return app
+# Endpoint ping sederhana untuk testing
+@api.route('/ping')
+class Ping(Resource):
+    def get(self):
+        """Endpoint untuk memeriksa status API."""
+        return {"message": "API Reseller Pulsa is running"}
