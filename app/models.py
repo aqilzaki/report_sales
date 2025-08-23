@@ -43,9 +43,6 @@ class Reseller(db.Model):
     komisi = db.Column(db.BigInteger, default=0)
     wrgkirim = db.Column(db.String(50))
 
-    # Relationship
-    transaksi = db.relationship('Transaksi', backref='reseller_ref', lazy=True, foreign_keys='Transaksi.kode_reseller')
-
 class Transaksi(db.Model):
     __tablename__ = 'transaksi'
     
@@ -53,7 +50,7 @@ class Transaksi(db.Model):
     tgl_entri = db.Column(db.DateTime, default=datetime.utcnow)
     kode_produk = db.Column(db.String(50))
     tujuan = db.Column(db.String(50))
-    kode_reseller = db.Column(db.String(50), db.ForeignKey('reseller.kode'), nullable=False)
+    kode_reseller = db.Column(db.String(50), nullable=False)
     pengirim = db.Column(db.String(50))
     tipe_pengirim = db.Column(db.String(20))
     harga = db.Column(db.BigInteger, nullable=False, default=0)
