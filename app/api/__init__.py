@@ -1,9 +1,18 @@
-from flask import Blueprint
-from flask_restx import Api
+from flask import Flask
+from .config import Config
+from .database import db, migrate
 
-from .laporan_sales.resource import api as laporan_ns
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
 
-blueprint = Blueprint('api', __name__, url_prefix='/v1')
-api = Api(blueprint, title='API Laporan Sales', version='1.0')
+    db.init_app(app)
+    migrate.init_app(app, db)
 
-api.add_namespace(laporan_ns, path='/laporan')
+    # Import models untuk memastikan mereka terdaftar dengan SQLAlchemy
+    from . import models
+
+    from .api import blueprint as api_bp
+    app.register_blueprint(api_bp)
+
+    return app

@@ -1,34 +1,85 @@
 from .database import db
+from datetime import datetime
 
-class Sales(db.Model):
-    __tablename__ = 'sales'
-    id_mr = db.Column(db.String(50), primary_key=True)
-    nama_mr = db.Column(db.String(100), nullable=False)
+class Reseller(db.Model):
+    __tablename__ = 'reseller'
+    
+    kode = db.Column(db.String(50), primary_key=True)
+    nama = db.Column(db.String(100), nullable=False)
+    saldo = db.Column(db.BigInteger, default=0)
+    alamat = db.Column(db.Text)
+    pin = db.Column(db.String(10))
+    aktif = db.Column(db.Boolean, default=True)
+    kode_upline = db.Column(db.String(50))
+    kode_level = db.Column(db.String(10))
+    keterangan = db.Column(db.Text)
+    tgl_daftar = db.Column(db.DateTime, default=datetime.utcnow)
+    saldo_minimal = db.Column(db.BigInteger, default=0)
+    tgl_aktivitas = db.Column(db.DateTime)
+    pengingat_saldo = db.Column(db.BigInteger, default=0)
+    f_pengingat_saldo = db.Column(db.Boolean, default=False)
+    nama_pemilik = db.Column(db.String(100))
+    kode_area = db.Column(db.String(10))
+    tgl_pengingat = db.Column(db.DateTime)
+    markup = db.Column(db.Integer, default=0)
+    old = db.Column(db.String(50))
+    poin = db.Column(db.Integer, default=0)
+    alamat_ip = db.Column(db.String(45))
+    url_report = db.Column(db.String(255))
+    tgl_data = db.Column(db.DateTime)
+    wrkirim = db.Column(db.String(50))
+    suspemd = db.Column(db.Boolean, default=False)
+    kode_deposit = db.Column(db.String(50))
+    berita_transfer = db.Column(db.Text)
+    ip_no_sign = db.Column(db.String(45))
+    deleted = db.Column(db.Boolean, default=False)
+    nomor_ktp = db.Column(db.String(20))
+    npwp = db.Column(db.String(20))
+    harus_ubah_pin = db.Column(db.Boolean, default=False)
+    nomor_hp = db.Column(db.String(20))
+    email = db.Column(db.String(100))
+    blok_produk = db.Column(db.Text)
+    kode_referal = db.Column(db.String(50))
+    komisi = db.Column(db.BigInteger, default=0)
+    wrgkirim = db.Column(db.String(50))
 
-class KondisiOutlet(db.Model):
-    __tablename__ = 'kondisi_outlet'
-    id = db.Column(db.String(50), primary_key=True)
-    kondisi = db.Column(db.String(100), nullable=False)
+    # Relationship
+    transaksi = db.relationship('Transaksi', backref='reseller_ref', lazy=True, foreign_keys='Transaksi.kode_reseller')
 
-class Outlet(db.Model):
-    __tablename__ = 'outlet'
-    id_tm = db.Column(db.String(50), primary_key=True)
-    nama_tm = db.Column(db.String(100))
-    id_kondisi_outlet = db.Column(db.String(50), db.ForeignKey('kondisi_outlet.id'))
-    lokasi = db.Column(db.String(255))
-    id_mr = db.Column(db.String(50), db.ForeignKey('sales.id_mr'))
-    transaksi = db.Column(db.BigInteger)
-
-class ReportTransaksi(db.Model):
-    __tablename__ = 'report_transaksi'
-    id_trx = db.Column(db.String(50), primary_key=True)
-    id_mr = db.Column(db.String(50), db.ForeignKey('sales.id_mr'))
-    id_tm = db.Column(db.String(50), db.ForeignKey('outlet.id_tm'))
-    transaksi = db.Column(db.BigInteger, nullable=False, default=0)
-    create_at = db.Column(db.BigInteger)
-
-class KodeInsentif(db.Model):
-    __tablename__ = 'kode_insentif'
-    id_insentif = db.Column(db.String(50), primary_key=True)
-    kode = db.Column(db.String(50))
-    persentase = db.Column(db.Float, nullable=False, default=0.0)
+class Transaksi(db.Model):
+    __tablename__ = 'transaksi'
+    
+    kode = db.Column(db.String(50), primary_key=True)
+    tgl_entri = db.Column(db.DateTime, default=datetime.utcnow)
+    kode_produk = db.Column(db.String(50))
+    tujuan = db.Column(db.String(50))
+    kode_reseller = db.Column(db.String(50), db.ForeignKey('reseller.kode'), nullable=False)
+    pengirim = db.Column(db.String(50))
+    tipe_pengirim = db.Column(db.String(20))
+    harga = db.Column(db.BigInteger, nullable=False, default=0)
+    kode_inbox = db.Column(db.String(50))
+    status = db.Column(db.String(20))
+    tgl_status = db.Column(db.DateTime)
+    kode_terminal = db.Column(db.String(50))
+    ket_modul = db.Column(db.Text)
+    harga_beli = db.Column(db.BigInteger, default=0)
+    kode_jawaban = db.Column(db.String(50))
+    saldo_awal = db.Column(db.BigInteger, default=0)
+    perintah = db.Column(db.Text)
+    counter = db.Column(db.Integer, default=0)
+    counter2 = db.Column(db.Integer, default=0)
+    sn = db.Column(db.String(100))
+    modul_proses = db.Column(db.String(50))
+    kirim_ulang = db.Column(db.Boolean, default=False)
+    penerima = db.Column(db.String(100))
+    qty = db.Column(db.Integer, default=1)
+    is_voucher = db.Column(db.Boolean, default=False)
+    komisi = db.Column(db.BigInteger, default=0)
+    bill_set = db.Column(db.String(50))
+    keterangan = db.Column(db.Text)
+    poin = db.Column(db.Integer, default=0)
+    wrkirim = db.Column(db.String(50))
+    hide_kiosk = db.Column(db.Boolean, default=False)
+    unit = db.Column(db.String(20))
+    saldo_supplier = db.Column(db.BigInteger, default=0)
+    kode_dompet = db.Column(db.String(50))

@@ -9,6 +9,9 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
 
+    # Import models untuk memastikan mereka terdaftar dengan SQLAlchemy
+    from . import models
+
     from .api import blueprint as api_bp
     app.register_blueprint(api_bp)
 
