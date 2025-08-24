@@ -122,7 +122,7 @@ def seed_data():
         {'kode': 'AXIS5', 'harga': 5200, 'harga_beli': 4800}
     ]
     nomor_hp_list = [f"08{random.randint(1000000000,9999999999)}" for _ in range(200)]
-    status_list = ['SUCCESS', 'PENDING', 'FAILED', 'PROCESS']
+    status_list = ['20', '40']
     reseller_codes = [r.kode for r in reseller_data]
 
     transaksi_data = []
@@ -164,12 +164,12 @@ def seed_data():
                 saldo_awal=saldo_awal,
                 perintah=f"{produk['kode']}.{nomor_tujuan}",
                 counter=random.randint(1, 5),
-                sn=generate_code('SN', 12) if status == 'SUCCESS' else None,
+                sn=generate_code('SN', 12) if status == '20' else None,
                 penerima=nomor_tujuan,
                 qty=1,
                 is_voucher=False,
-                komisi=komisi if status == 'SUCCESS' else 0,
-                poin=random.randint(1, 10) if status == 'SUCCESS' else 0,
+                komisi=komisi if status == '20' else 0,
+                poin=random.randint(1, 10) if status == '20' else 0,
                 hide_kiosk=False
             )
         )

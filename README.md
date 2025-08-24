@@ -1,235 +1,147 @@
-# 📊 Marketing Salary Report - Backend
+Tentu, ini adalah file `README.md` yang Anda minta.
 
-Backend service untuk sistem laporan reseller (hierarchy, summary transaksi, weekly growth, dan monthly comparison) menggunakan **Flask + Flask-RESTX + SQLAlchemy**.
+````markdown
+# Laporan Penjualan API
 
----
+API Laporan Penjualan adalah layanan backend yang dibuat dengan Python dan Flask untuk mengelola data penjualan dari reseller. API ini menyediakan fungsionalitas untuk mengelola reseller, transaksi, dan membuat laporan penjualan.
 
-## 🚀 Fitur
+## Fitur
 
-- **Reseller Hierarchy**
-  - Ambil struktur upline–downline dengan total profit.
-  - `GET /report/hierarchy`
+* **Manajemen Reseller**: Operasi CRUD untuk mengelola data reseller.
+* **Manajemen Transaksi**: Melacak transaksi penjualan yang dilakukan oleh reseller.
+* **Laporan Penjualan**: Membuat laporan penjualan berdasarkan periode (harian, mingguan, bulanan).
+* **Hirarki Reseller**: Mengelola hubungan upline-downline antar reseller.
+* **Autentikasi**: Mengamankan endpoint menggunakan token JWT.
 
-- **Reseller Summary (Custom Period)**
-  - Ambil ringkasan transaksi reseller berdasarkan filter:
-    - `day` (tanggal tertentu)
-    - `week` (minggu tertentu dalam bulan)
-    - `month` (bulan penuh)
-  - `GET /report/reseller/summary/custom`
+## Teknologi yang Digunakan
 
-- **Self Summary (Upline)**
-  - Lihat ringkasan transaksi hanya untuk reseller/upline tertentu (berdasarkan kode login).
-  - `GET /report/self/summary?kode=RM001&period=month&year=2025&month=8`
+* **Python**: Bahasa pemrograman utama yang digunakan untuk membangun aplikasi.
+* **Flask**: Kerangka kerja web yang digunakan untuk membangun API.
+* **Flask-SQLAlchemy**: Ekstensi Flask untuk bekerja dengan database SQL.
+* **Flask-Migrate**: Ekstensi Flask untuk menangani migrasi database.
+* **Flask-RESTX**: Ekstensi Flask untuk membangun RESTful API.
+* **MySQL**: Database relasional yang digunakan untuk menyimpan data.
+* **JWT**: JSON Web Tokens digunakan untuk autentikasi.
 
-- **Admin Summary Weekly**
-  - Ringkasan per minggu untuk semua upline dalam satu bulan.
-  - `GET /report/admin/summary/week?year=2025&month=8`
+## Instalasi
 
-- **Admin Monthly Compare**
-  - Bandingkan performa reseller di **2 bulan berbeda** (growth analysis).
-  - `GET /report/admin/summary/compare?year1=2025&month1=7&year2=2025&month2=8`
+1.  **Kloning repositori:**
+    ```bash
+    git clone [https://github.com/aqilzaki/report_sales.git](https://github.com/aqilzaki/report_sales.git)
+    cd report_sales
+    ```
 
----
+2.  **Buat dan aktifkan lingkungan virtual:**
+    ```bash
+    python -m venv env
+    source env/bin/activate  # Di Windows, gunakan `env\Scripts\activate`
+    ```
 
-## 🗂 Struktur Project
+3.  **Instal dependensi:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-```bash
-app/
-├── api/
-│   ├── report/
-│   │   ├── resource.py      # Resource (endpoint)
-│   │   ├── controller.py    # Logic controller
-│   │   ├── dto.py           # Data Transfer Objects (schema response)
-│   │   └── __init__.py
-├── models.py                # Model SQLAlchemy (Reseller, Transaksi)
-├── database.py              # Konfigurasi database
-└── __init__.py
+4.  **Konfigurasi variabel lingkungan:**
+    Buat file `.env` di direktori root dan tambahkan variabel berikut:
+    ```
+    SECRET_KEY=kunci_rahasia_anda
+    SQLALCHEMY_DATABASE_URI=mysql+mysqlconnector://user:password@host/db_name
+    ```
+
+5.  **Jalankan migrasi database:**
+    ```bash
+    flask db upgrade
+    ```
+
+6.  **Jalankan aplikasi:**
+    ```bash
+    python run.py
+    ```
+
+## Struktur Proyek
+
+````
+
+.
+├── app/
+│   ├── **init**.py
+│   ├── api/
+│   │   ├── **init**.py
+│   │   ├── auth/
+│   │   ├── report/
+│   │   ├── reseller/
+│   │   └── transaksi/
+│   ├── database.py
+│   ├── models.py
+│   └── seed.py
+├── migrations/
+├── requirements.txt
+└── run.py
+
 ```
 
----
+## Model Database
 
-## ⚡️ Instalasi & Setup
+### Reseller
 
-1. Clone repository:
-   ```bash
-   git clone https://github.com/username/marketing-salary-report.git
-   cd marketing-salary-report/bakcend
-   ```
+| Nama Kolom     | Tipe Data      | Deskripsi                               |
+| :--------------- | :------------- | :-------------------------------------- |
+| `kode`           | `String(50)`   | **Kunci Utama**, Kode unik reseller.    |
+| `nama`           | `String(100)`  | Nama reseller.                          |
+| `saldo`          | `BigInteger`   | Saldo reseller.                         |
+| `alamat`         | `Text`         | Alamat reseller.                        |
+| `pin`            | `String(10)`   | PIN reseller.                           |
+| `aktif`          | `Boolean`      | Status aktif reseller.                  |
+| `kode_upline`    | `String(50)`   | Kode upline reseller.                   |
+| `kode_level`     | `String(10)`   | Kode level reseller.                    |
+| `tgl_daftar`     | `DateTime`     | Tanggal pendaftaran reseller.           |
+| `saldo_minimal`  | `BigInteger`   | Saldo minimal yang harus dimiliki.      |
+| ...              | ...            | ...                                     |
 
-2. Buat virtual environment:
-   ```bash
-   python -m venv env
-   source env/bin/activate  # Linux/Mac
-   env\Scripts\activate     # Windows
-   ```
+### Transaksi
 
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+| Nama Kolom      | Tipe Data      | Deskripsi                              |
+| :---------------- | :------------- | :------------------------------------- |
+| `kode`            | `String(50)`   | **Kunci Utama**, Kode unik transaksi.  |
+| `tgl_entri`       | `DateTime`     | Tanggal entri transaksi.               |
+| `kode_produk`     | `String(50)`   | Kode produk.                           |
+| `tujuan`          | `String(50)`   | Tujuan transaksi.                      |
+| `kode_reseller`   | `String(50)`   | Kode reseller yang melakukan transaksi.|
+| `harga`           | `BigInteger`   | Harga transaksi.                       |
+| `harga_beli`      | `BigInteger`   | Harga beli produk.                     |
+| `status`          | `String(20)`   | Status transaksi.                      |
+| ...               | ...            | ...                                    |
 
-4. Setup database (misalnya SQLite / PostgreSQL), lalu jalankan migrasi:
-   ```bash
-   flask db upgrade
-   ```
+## Endpoint API
 
-5. Seed data dummy:
-   ```bash
-   flask seed
-   ```
+### Otentikasi
 
-6. Jalankan server:
-   ```bash
-   flask run
-   ```
+* `POST /auth/login`: Login untuk mendapatkan token JWT.
+* `POST /auth/register`: Mendaftarkan reseller baru.
 
----
+### Reseller
 
-## 📌 API Endpoint
+* `GET /reseller`: Mendapatkan semua data reseller.
+* `GET /reseller/<kode>`: Mendapatkan data reseller berdasarkan kode.
+* `GET /reseller/<kode>/statistik`: Mendapatkan data reseller beserta statistik transaksi.
+* `GET /reseller/level/<level>`: Mendapatkan data reseller berdasarkan level.
+* `GET /reseller/downline/<kode_upline>`: Mendapatkan data downline dari seorang upline.
+* `GET /reseller/top`: Mendapatkan top reseller berdasarkan omset.
 
-### 🔹 Hierarchy
+### Transaksi
+
+* `GET /transaksi/reseller/<kode_reseller>`: Mendapatkan transaksi berdasarkan kode reseller.
+* `GET /transaksi/summary/<kode_reseller>`: Mendapatkan ringkasan transaksi reseller.
+* `GET /transaksi/recent`: Mendapatkan transaksi terbaru.
+* `GET /transaksi/status/<status>`: Mendapatkan transaksi berdasarkan status.
+* `GET /transaksi/laporan/harian`: Mendapatkan laporan transaksi harian.
+
+### Laporan
+
+* `GET /report/profit-hirarki`: Mendapatkan hierarki reseller dengan profit.
+* `GET /report/summary`: Mendapatkan ringkasan transaksi reseller dengan filter periode.
+* `GET /report/summary/self`: Mendapatkan ringkasan transaksi untuk 1 upline (diri sendiri).
+* `GET /report/summary/weekly`: Mendapatkan ringkasan per minggu untuk semua upline.
+* `GET /report/compare`: Membandingkan ringkasan bulan1 vs bulan2 (per minggu).
 ```
-GET /report/hierarchy
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Laporan hierarchy berhasil diambil",
-  "data": [
-    {
-      "upline": {
-        "kode": "RM001",
-        "nama": "Master Reseller 1",
-        "total_profit": 1200000
-      },
-      "downlines": [
-        {
-          "kode": "RSLA001",
-          "nama": "Agen 1",
-          "jumlah_transaksi": 150,
-          "total_profit": 250000
-        }
-      ]
-    }
-  ]
-}
-```
-
----
-
-### 🔹 Custom Summary
-```
-GET /report/reseller/summary/custom?period=month&year=2025&month=8
-```
-
-**Response:**
-```json
-[
-  {
-    "id_upline": "RM001",
-    "nama_upline": "Master Reseller 1",
-    "periode": "month",
-    "jmlh_trx": 500,
-    "jmlh_trx_aktif": 450,
-    "akuisisi": 10,
-    "akuisisi_aktif": 8,
-    "omset": 5000000,
-    "profit_upline": 500000,
-    "insentif": 50000,
-    "start": "2025-08-01T00:00:00",
-    "end": "2025-08-31T23:59:59"
-  }
-]
-```
-
----
-
-### 🔹 Self Summary
-```
-GET /report/self/summary?kode=RM001&period=month&year=2025&month=8
-```
-
-**Response:**
-```json
-{
-  "id_upline": "RM001",
-  "nama_upline": "Master Reseller 1",
-  "periode": "month",
-  "jmlh_trx": 500,
-  "jmlh_trx_aktif": 450,
-  "akuisisi": 10,
-  "akuisisi_aktif": 8,
-  "omset": 5000000,
-  "profit_upline": 500000,
-  "insentif": 50000,
-  "start": "2025-08-01T00:00:00",
-  "end": "2025-08-31T23:59:59"
-}
-```
-
----
-
-### 🔹 Admin Weekly Summary
-```
-GET /report/admin/summary/week?year=2025&month=8
-```
-
-**Response:**
-```json
-[
-  {
-    "id_upline": "RM001",
-    "nama_upline": "Master Reseller 1",
-    "week": 1,
-    "jmlh_trx": 120,
-    "jmlh_trx_aktif": 100,
-    "omset": 1500000,
-    "profit_upline": 150000
-  }
-]
-```
-
----
-
-### 🔹 Admin Monthly Compare
-```
-GET /report/admin/summary/compare?year1=2025&month1=7&year2=2025&month2=8
-```
-
-**Response:**
-```json
-[
-  {
-    "upline": "RM001",
-    "month1": {
-      "jmlh_trx": 400,
-      "omset": 4000000,
-      "profit": 400000
-    },
-    "month2": {
-      "jmlh_trx": 500,
-      "omset": 5000000,
-      "profit": 500000
-    }
-  }
-]
-```
-
----
-
-## 🧪 Testing
-
-Gunakan **Postman** atau **cURL** untuk mencoba API.
-
-Contoh:
-```bash
-curl "http://127.0.0.1:5000/report/self/summary?kode=RM001&period=month&year=2025&month=8"
-```
-
----
-
-## 👨‍💻 Author
-Dikembangkan oleh **Muhammad Aqil Zaki**  
-Institut Teknologi Padang – Teknik Informatika
