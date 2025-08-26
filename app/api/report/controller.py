@@ -346,42 +346,47 @@ def _has_no_15_day_gap(daily_transactions, start_dt, end_dt):
 
 # ======================== MAIN SUMMARY ========================
 
-def get_reseller_summary_custom(period="month", year=None, month=None, day=None, week=None):
-    """Ringkasan transaksi reseller dengan filter period (day|month|week)."""
+def get_reseller_summary_custom(period="month", year=None, month=None, day=None, week=None, page=1, limit=100):
     try:
         start_dt, end_dt = _get_period_range(period, year, month, day, week)
+        offset = (page - 1) * limit
+        dialect = db.engine.dialect.name.lower()
+        print(f"Database dialect: {dialect}")
 
-        # Query root dengan raw SQL
-        root_query = text("""
-            SELECT kode, nama 
-            FROM reseller 
-            WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
-        """)
-        root_results = db.session.execute(root_query).fetchall()
+        if dialect == "mssql":  # SQL Server pakai OFFSET-FETCH
+            root_query = text("""
+                SELECT kode, nama 
+                FROM reseller 
+                WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+                ORDER BY kode
+                OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+            """)
+        else:  # MySQL, PostgreSQL, SQLite pakai LIMIT OFFSET
+            root_query = text("""
+                SELECT kode, nama 
+                FROM reseller 
+                WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+                ORDER BY kode
+                LIMIT :limit OFFSET :offset
+            """)
 
+        root_results = db.session.execute(root_query, {"offset": offset, "limit": limit}).fetchall()
+        
         hasil = []
         for root_row in root_results:
-            root_kode = root_row[0]
-            root_nama = root_row[1]
-            
-            # Ambil downlines
+            root_kode, root_nama = root_row
             downline_query = text("SELECT kode FROM reseller WHERE kode_upline = :upline_kode")
-            downline_results = db.session.execute(downline_query, {'upline_kode': root_kode}).fetchall()
+            downline_results = db.session.execute(downline_query, {"upline_kode": root_kode}).fetchall()
             downline_codes = [r[0] for r in downline_results]
 
             jmlh_trx = total_omset = total_profit = 0.0
             jmlh_trx_aktif = akuisisi_aktif = 0
 
             if downline_codes:
-                # Buat placeholder untuk IN clause
-                placeholders = ','.join([f':code_{i}' for i in range(len(downline_codes))])
-                params = {f'code_{i}': code for i, code in enumerate(downline_codes)}
-                params.update({
-                    'start_dt': start_dt,
-                    'end_dt': end_dt
-                })
+                placeholders = ",".join([f":code_{i}" for i in range(len(downline_codes))])
+                params = {f"code_{i}": code for i, code in enumerate(downline_codes)}
+                params.update({"start_dt": start_dt, "end_dt": end_dt})
 
-                # Summary transaksi
                 trx_summary_query = text(f"""
                     SELECT 
                         COALESCE(COUNT(kode), 0) as jumlah,
@@ -392,20 +397,18 @@ def get_reseller_summary_custom(period="month", year=None, month=None, day=None,
                         AND tgl_entri >= :start_dt
                         AND tgl_entri <= :end_dt
                 """)
-
                 trx_result = db.session.execute(trx_summary_query, params).fetchone()
                 jmlh_trx = int(trx_result[0] or 0)
                 total_omset = float(trx_result[1] or 0)
                 total_profit = float(trx_result[2] or 0)
 
-                # Hitung reseller aktif
                 jmlh_trx_aktif = _count_active_resellers(downline_codes, start_dt, end_dt)
                 akuisisi_aktif = _count_acquisition_active_resellers(downline_codes, start_dt, end_dt)
 
             akuisisi = len(downline_codes)
             insentif_detail = calculate_insentif(total_profit)
 
-            hasil.append({
+            dto = {
                 "id_upline": root_kode,
                 "nama_upline": root_nama,
                 "periode": period,
@@ -419,12 +422,21 @@ def get_reseller_summary_custom(period="month", year=None, month=None, day=None,
                 "insentif_detail": insentif_detail,
                 "start": start_dt.isoformat(timespec="seconds"),
                 "end": end_dt.isoformat(timespec="seconds"),
-            })
+            }
+            print(f"[DEBUG] Reseller Summary DTO: {dto}")  # log ke terminal
+            hasil.append(dto)
 
         return hasil
+        
+
     except Exception as e:
         print(f"Error in get_reseller_summary_custom: {str(e)}")
-        return []
+        return {
+            "status": "error",
+            "message": "Terjadi kesalahan saat mengambil data summary",
+            "error": str(e),
+            "data": []
+        }
 
 def get_self_summary(token, period="month", year=None, month=None, day=None, week=None):
     try:

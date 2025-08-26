@@ -45,7 +45,7 @@ class ResellerSummaryCustomResource(Resource):
                  'year': 'Tahun (wajib untuk month/week)',
                  'month': 'Bulan 1-12 (wajib untuk month/week)',
                  'day': 'Tanggal format YYYY-MM-DD (untuk period=day)',
-                 'week': 'Minggu ke-N dalam bulan (untuk period=week)'
+                 'week': 'Minggu ke-N dalam bulan (untuk period=week)',
              })
     def get(self):
         """Ambil ringkasan reseller dengan filter hari/bulan/minggu"""
