@@ -1,8 +1,8 @@
 """empty message
 
-Revision ID: e23ae29e7a8b
+Revision ID: 4db2da47f14e
 Revises: 
-Create Date: 2025-08-23 10:07:13.433393
+Create Date: 2025-08-26 00:35:46.231485
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = 'e23ae29e7a8b'
+revision = '4db2da47f14e'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -35,15 +35,16 @@ def upgrade():
     sa.Column('f_pengingat_saldo', sa.Boolean(), nullable=True),
     sa.Column('nama_pemilik', sa.String(length=100), nullable=True),
     sa.Column('kode_area', sa.String(length=10), nullable=True),
-    sa.Column('tgl_pengingat', sa.DateTime(), nullable=True),
+    sa.Column('tgl_pengingat_saldo', sa.DateTime(), nullable=True),
     sa.Column('markup', sa.Integer(), nullable=True),
-    sa.Column('old', sa.String(length=50), nullable=True),
+    sa.Column('oid', sa.String(length=50), nullable=True),
     sa.Column('poin', sa.Integer(), nullable=True),
     sa.Column('alamat_ip', sa.String(length=45), nullable=True),
+    sa.Column('password_ip', sa.String(length=255), nullable=True),
     sa.Column('url_report', sa.String(length=255), nullable=True),
     sa.Column('tgl_data', sa.DateTime(), nullable=True),
     sa.Column('wrkirim', sa.String(length=50), nullable=True),
-    sa.Column('suspemd', sa.Boolean(), nullable=True),
+    sa.Column('suspend', sa.Boolean(), nullable=True),
     sa.Column('kode_deposit', sa.String(length=50), nullable=True),
     sa.Column('berita_transfer', sa.Text(), nullable=True),
     sa.Column('ip_no_sign', sa.String(length=45), nullable=True),
@@ -71,6 +72,7 @@ def upgrade():
     sa.Column('kode_inbox', sa.String(length=50), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
     sa.Column('tgl_status', sa.DateTime(), nullable=True),
+    sa.Column('kode_modul', sa.String(length=50), nullable=True),
     sa.Column('kode_terminal', sa.String(length=50), nullable=True),
     sa.Column('ket_modul', sa.Text(), nullable=True),
     sa.Column('harga_beli', sa.BigInteger(), nullable=True),
@@ -84,9 +86,15 @@ def upgrade():
     sa.Column('kirim_ulang', sa.Boolean(), nullable=True),
     sa.Column('penerima', sa.String(length=100), nullable=True),
     sa.Column('qty', sa.Integer(), nullable=True),
+    sa.Column('kirim_info', sa.Text(), nullable=True),
+    sa.Column('kode_area', sa.String(length=10), nullable=True),
+    sa.Column('ref_id', sa.String(length=50), nullable=True),
+    sa.Column('params', sa.Text(), nullable=True),
+    sa.Column('harga_beli2', sa.BigInteger(), nullable=True),
     sa.Column('is_voucher', sa.Boolean(), nullable=True),
     sa.Column('komisi', sa.BigInteger(), nullable=True),
     sa.Column('bill_set', sa.String(length=50), nullable=True),
+    sa.Column('bill', sa.String(length=50), nullable=True),
     sa.Column('keterangan', sa.Text(), nullable=True),
     sa.Column('poin', sa.Integer(), nullable=True),
     sa.Column('wrkirim', sa.String(length=50), nullable=True),
