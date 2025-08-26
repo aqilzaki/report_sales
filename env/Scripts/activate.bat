@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=D:\project\tekmo\marketing salary report\bakcend\env
+set VIRTUAL_ENV=D:\website tekmo\report sales\report_sales\env
 
 if not defined PROMPT set PROMPT=$P$G
 
