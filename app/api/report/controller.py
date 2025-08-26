@@ -507,32 +507,38 @@ def get_self_summary(token, period="month", year=None, month=None, day=None, wee
         print(f"Error in get_self_summary: {str(e)}")
         return {"error": str(e)}
 
-def get_summary_by_week(year, month):
-    """Ambil summary per minggu untuk semua upline (admin view)"""
+def get_summary_by_week(year, month, page: int = 1, per_page: int = 50):
+    """Ambil summary per minggu untuk semua upline (support MySQL & MSSQL) dengan pagination."""
     try:
         month_cal = calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
         results = []
 
-        # Query root
-        root_query = text("SELECT kode, nama FROM reseller WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'")
-        root_results = db.session.execute(root_query).fetchall()
+        # Ambil semua root upline
+        root_query = text("""
+            SELECT kode, nama 
+            FROM reseller 
+            WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+            ORDER BY kode
+        """)
+        all_roots = db.session.execute(root_query).fetchall()
+
+        # Pagination di Python
+        total_roots = len(all_roots)
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        root_results = all_roots[start_idx:end_idx]
 
         for week_num, week_days in enumerate(month_cal, start=1):
             start_dt = datetime.combine(week_days[0], datetime.min.time())
             end_dt = datetime.combine(week_days[-1], datetime.max.time())
 
-            for root_row in root_results:
-                root_kode = root_row[0]
-                root_nama = root_row[1]
-                
+            for root_kode, root_nama in root_results:
                 # Ambil downlines
                 downline_query = text("SELECT kode FROM reseller WHERE kode_upline = :upline_kode")
-                downline_results = db.session.execute(downline_query, {'upline_kode': root_kode}).fetchall()
-                downline_codes = [r[0] for r in downline_results]
+                downline_codes = [r[0] for r in db.session.execute(downline_query, {'upline_kode': root_kode}).fetchall()]
 
-                jmlh_trx = jmlh_trx_aktif = 0
+                jmlh_trx = jmlh_trx_aktif = akuisisi_aktif = 0
                 total_omset = total_profit = 0.0
-                akuisisi_aktif = 0
 
                 if downline_codes:
                     placeholders = ','.join([f':code_{i}' for i in range(len(downline_codes))])
@@ -541,13 +547,12 @@ def get_summary_by_week(year, month):
 
                     trx_summary_query = text(f"""
                         SELECT 
-                            COALESCE(COUNT(kode), 0) as jumlah,
-                            COALESCE(SUM(harga), 0) as omset,
-                            COALESCE(SUM(harga - harga_beli), 0) as profit
-                        FROM transaksi 
+                            COALESCE(COUNT(*), 0) AS jumlah,
+                            COALESCE(SUM(harga), 0) AS omset,
+                            COALESCE(SUM(harga - harga_beli), 0) AS profit
+                        FROM transaksi
                         WHERE kode_reseller IN ({placeholders})
-                            AND tgl_entri >= :start_dt
-                            AND tgl_entri <= :end_dt
+                          AND tgl_entri BETWEEN :start_dt AND :end_dt
                     """)
 
                     trx_result = db.session.execute(trx_summary_query, params).fetchone()
@@ -571,16 +576,23 @@ def get_summary_by_week(year, month):
                     "akuisisi_aktif": int(akuisisi_aktif),
                     "omset": total_omset,
                     "profit_upline": total_profit,
-                    "insentif": insentif_detail["total_insentif"],
+                    "insentif": float(insentif_detail["total_insentif"]),
                     "insentif_detail": insentif_detail,
                     "start": start_dt.isoformat(timespec="seconds"),
                     "end": end_dt.isoformat(timespec="seconds"),
                 })
 
-        return results
+        return {
+            "page": page,
+            "per_page": per_page,
+            "total_roots": total_roots,
+            "total_pages": (total_roots + per_page - 1) // per_page,
+            "data": results
+        }
+
     except Exception as e:
         print(f"Error in get_summary_by_week: {str(e)}")
-        return []
+        return {"page": page, "per_page": per_page, "total_roots": 0, "total_pages": 0, "data": []}
 
 def compare_months(year1, month1, year2, month2):
     """Bandingkan summary bulan1 vs bulan2 (per minggu, per upline)"""
