@@ -46,6 +46,8 @@ class ResellerSummaryCustomResource(Resource):
                  'month': 'Bulan 1-12 (wajib untuk month/week)',
                  'day': 'Tanggal format YYYY-MM-DD (untuk period=day)',
                  'week': 'Minggu ke-N dalam bulan (untuk period=week)',
+                 'page': 'Halaman yang diminta',
+                 'limit': 'Jumlah data per halaman'
              })
     def get(self):
         """Ambil ringkasan reseller dengan filter hari/bulan/minggu"""
@@ -55,9 +57,11 @@ class ResellerSummaryCustomResource(Resource):
             month = request.args.get("month", type=int)
             day = request.args.get("day")
             week = request.args.get("week", type=int)
+            page = request.args.get("page", type=int, default=1)
+            limit = request.args.get("limit", type=int, default=25)
 
             data = ctrl.get_reseller_summary_custom(
-                period=period, year=year, month=month, day=day, week=week
+                period=period, year=year, month=month, day=day, week=week, page=page, limit=limit
             )
             
             return {
@@ -90,7 +94,7 @@ class SelfSummaryResource(Resource):
                  'year': 'Tahun (wajib untuk month/week)',
                  'month': 'Bulan 1-12 (wajib untuk month/week)',
                  'day': 'Tanggal format YYYY-MM-DD (untuk period=day)',
-                 'week': 'Minggu ke-N dalam bulan (untuk period=week)'
+                 'week': 'Minggu ke-N dalam bulan (untuk period=week)',
              },
              security='Bearer')
     @api.doc(security='Bearer')

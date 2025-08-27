@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, date
 from flask import current_app
 import calendar
 from app.api.auth.controller import get_user_from_token
+from decimal import Decimal
+
 
 def get_reseller_hierarchy_with_profit():
     """Ambil semua reseller root, cek downline, dan hitung profit per downline lalu akumulasi ke upline"""
@@ -15,21 +17,24 @@ def get_reseller_hierarchy_with_profit():
         # Debug: Cek struktur tabel reseller dulu
         print("Checking table structure...")
         
-        # Gunakan raw query untuk lebih aman
-        # 1. Cari reseller yang tidak punya upline (root)
+        # 1. Cari reseller yang tidak punya upline (root) -> pakai TOP untuk SQL Server
         root_query = text("""
-            SELECT kode, nama, kode_upline 
-            FROM reseller 
+            SELECT TOP 10 kode, nama, kode_upline
+            FROM reseller
             WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
-            LIMIT 10
+            ORDER BY kode
         """)
         
         root_results = db.session.execute(root_query).fetchall()
         print(f"Found {len(root_results)} potential roots")
         
         if not root_results:
-            # Jika tidak ada root, coba ambil semua reseller dan lihat strukturnya
-            sample_query = text("SELECT kode, nama, kode_upline FROM reseller LIMIT 5")
+            # Jika tidak ada root, coba ambil sample reseller (TOP 5)
+            sample_query = text("""
+                SELECT TOP 5 kode, nama, kode_upline 
+                FROM reseller
+                ORDER BY kode
+            """)
             sample_results = db.session.execute(sample_query).fetchall()
             print("Sample resellers:")
             for r in sample_results:
@@ -110,22 +115,21 @@ def get_reseller_hierarchy_with_profit():
         return []
 
 # ======================== PERIOD FILTER ========================
-
 def _get_period_range(period: str, year=None, month=None, day=None, week=None):
-    """Hitung range waktu berdasarkan period (day|month|week)"""
+    """Hitung range waktu berdasarkan period (day|month|week) - inclusive"""
     try:
         if period == "day":
             if not day:
                 raise ValueError("day harus diisi format YYYY-MM-DD")
             start = datetime.strptime(day, "%Y-%m-%d")
-            end = start + timedelta(days=1)
+            end = start.replace(hour=23, minute=59, second=59)
 
         elif period == "month":
             if not year or not month:
                 raise ValueError("year dan month harus diisi untuk period=month")
             start = datetime(year, month, 1)
             days_in_month = calendar.monthrange(year, month)[1]
-            end = start + timedelta(days=days_in_month)
+            end = datetime(year, month, days_in_month, 23, 59, 59)
 
         elif period == "week":
             if not year or not month or not week:
@@ -147,77 +151,66 @@ def _get_period_range(period: str, year=None, month=None, day=None, week=None):
         print(f"Error in _get_period_range: {str(e)}")
         raise e
 
-# ======================== INSENTIF CALCULATION ========================
+# ======================== INSENTIF CALCULATION =======================
 
 def calculate_insentif(profit):
-    """
-    Hitung insentif berdasarkan skema:
-    - 0-3jt: 0 (basic salary 3jt)
-    - 3jt-10jt: Q1 10%
-    - 10jt-15jt: Q2 20% 
-    - 15jt-20jt: Q3 30%
-    - 20jt-25jt: Q4 40%
-    - 25jt+: Q5 50%
-    - Bonus ekstra 700rb jika profit > 10jt
-    """
-    if profit <= 3_000_000:
+    # Pastikan profit dalam Decimal
+    profit = Decimal(profit)
+
+    basic_salary = Decimal(3_000_000)
+    q1 = q2 = q3 = q4 = q5 = Decimal(0)
+    bonus_ekstra = Decimal(0)
+    
+    if profit <= Decimal(3_000_000):
         return {
-            "basic_salary": 3_000_000,
-            "q1": 0,
-            "q2": 0,
-            "q3": 0,
-            "q4": 0,
-            "q5": 0,
+            "basic_salary": int(basic_salary),
+            "q1": 0, "q2": 0, "q3": 0, "q4": 0, "q5": 0,
             "bonus_ekstra": 0,
             "total_insentif": 0,
-            "total_salary": 3_000_000
+            "total_salary": int(basic_salary)
         }
-    
-    basic_salary = 3_000_000
-    q1 = q2 = q3 = q4 = q5 = 0
-    bonus_ekstra = 0
-    
+
     # Q1: 3jt - 10jt (10%)
-    if profit > 3_000_000:
-        q1_max = min(profit, 10_000_000)
-        q1 = (q1_max - 3_000_000) * 0.10
+    if profit > Decimal(3_000_000):
+        q1_max = min(profit, Decimal(10_000_000))
+        q1 = (q1_max - Decimal(3_000_000)) * Decimal("0.10")
     
     # Q2: 10jt - 15jt (20%)
-    if profit > 10_000_000:
-        q2_max = min(profit, 15_000_000)
-        q2 = (q2_max - 10_000_000) * 0.20
+    if profit > Decimal(10_000_000):
+        q2_max = min(profit, Decimal(15_000_000))
+        q2 = (q2_max - Decimal(10_000_000)) * Decimal("0.20")
     
     # Q3: 15jt - 20jt (30%)
-    if profit > 15_000_000:
-        q3_max = min(profit, 20_000_000)
-        q3 = (q3_max - 15_000_000) * 0.30
+    if profit > Decimal(15_000_000):
+        q3_max = min(profit, Decimal(20_000_000))
+        q3 = (q3_max - Decimal(15_000_000)) * Decimal("0.30")
     
     # Q4: 20jt - 25jt (40%)
-    if profit > 20_000_000:
-        q4_max = min(profit, 25_000_000)
-        q4 = (q4_max - 20_000_000) * 0.40
+    if profit > Decimal(20_000_000):
+        q4_max = min(profit, Decimal(25_000_000))
+        q4 = (q4_max - Decimal(20_000_000)) * Decimal("0.40")
     
     # Q5: 25jt+ (50%)
-    if profit > 25_000_000:
-        q5 = (profit - 25_000_000) * 0.50
+    if profit > Decimal(25_000_000):
+        q5 = (profit - Decimal(25_000_000)) * Decimal("0.50")
     
     # Bonus ekstra jika profit > 10jt
-    if profit > 10_000_000:
-        bonus_ekstra = 700_000
+    if profit > Decimal(10_000_000):
+        bonus_ekstra = Decimal(700_000)
     
     total_insentif = q1 + q2 + q3 + q4 + q5 + bonus_ekstra
     total_salary = basic_salary + total_insentif
     
     return {
-        "basic_salary": basic_salary,
-        "q1": q1,
-        "q2": q2,
-        "q3": q3,
-        "q4": q4,
-        "q5": q5,
-        "bonus_ekstra": bonus_ekstra,
-        "total_insentif": total_insentif,
-        "total_salary": total_salary
+        "basic_salary": int(basic_salary),
+        "q1": int(q1),
+        "q2": int(q2),
+        "q3": int(q3),
+        "q4": int(q4),
+        "q5": int(q5),
+        "bonus_ekstra": int(bonus_ekstra),
+        "total_insentif": int(total_insentif),
+        "total_salary": int(total_salary)
     }
 
 # ======================== HELPER FUNCTIONS FOR ACTIVITY CHECK ========================
@@ -237,14 +230,16 @@ def _count_active_resellers(reseller_codes, start_dt, end_dt):
         for reseller_code in reseller_codes:
             # Query dengan raw SQL untuk lebih aman
             daily_trx_query = text("""
-                SELECT 
-                    DATE(tgl_entri) as trx_date,
-                    COUNT(kode) as daily_count
+              SELECT 
+                CAST(tgl_entri AS DATE) as trx_date,
+                COUNT(kode) as daily_count
                 FROM transaksi 
                 WHERE kode_reseller = :reseller_code
                     AND tgl_entri >= :start_dt
                     AND tgl_entri <= :end_dt
-                GROUP BY DATE(tgl_entri)
+                GROUP BY CAST(tgl_entri AS DATE)
+
+
             """)
             
             trx_results = db.session.execute(daily_trx_query, {
@@ -346,8 +341,7 @@ def _has_no_15_day_gap(daily_transactions, start_dt, end_dt):
 
 # ======================== MAIN SUMMARY ========================
 
-
-def get_reseller_summary_custom(period="month", year=None, month=None, day=None, week=None, page=1, limit=100):
+def get_reseller_summary_custom(period="month", year=None, month=None, day=None, week=None, page=None, limit=None):
     try:
         start_dt, end_dt = _get_period_range(period, year, month, day, week)
         offset = (page - 1) * limit
@@ -512,32 +506,38 @@ def get_self_summary(token, period="month", year=None, month=None, day=None, wee
         print(f"Error in get_self_summary: {str(e)}")
         return {"error": str(e)}
 
-def get_summary_by_week(year, month):
-    """Ambil summary per minggu untuk semua upline (admin view)"""
+def get_summary_by_week(year, month, page: int = 1, per_page: int = 50):
+    """Ambil summary per minggu untuk semua upline (support MySQL & MSSQL) dengan pagination."""
     try:
         month_cal = calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
         results = []
 
-        # Query root
-        root_query = text("SELECT kode, nama FROM reseller WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'")
-        root_results = db.session.execute(root_query).fetchall()
+        # Ambil semua root upline
+        root_query = text("""
+            SELECT kode, nama 
+            FROM reseller 
+            WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+            ORDER BY kode
+        """)
+        all_roots = db.session.execute(root_query).fetchall()
+
+        # Pagination di Python
+        total_roots = len(all_roots)
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        root_results = all_roots[start_idx:end_idx]
 
         for week_num, week_days in enumerate(month_cal, start=1):
             start_dt = datetime.combine(week_days[0], datetime.min.time())
             end_dt = datetime.combine(week_days[-1], datetime.max.time())
 
-            for root_row in root_results:
-                root_kode = root_row[0]
-                root_nama = root_row[1]
-                
+            for root_kode, root_nama in root_results:
                 # Ambil downlines
                 downline_query = text("SELECT kode FROM reseller WHERE kode_upline = :upline_kode")
-                downline_results = db.session.execute(downline_query, {'upline_kode': root_kode}).fetchall()
-                downline_codes = [r[0] for r in downline_results]
+                downline_codes = [r[0] for r in db.session.execute(downline_query, {'upline_kode': root_kode}).fetchall()]
 
-                jmlh_trx = jmlh_trx_aktif = 0
+                jmlh_trx = jmlh_trx_aktif = akuisisi_aktif = 0
                 total_omset = total_profit = 0.0
-                akuisisi_aktif = 0
 
                 if downline_codes:
                     placeholders = ','.join([f':code_{i}' for i in range(len(downline_codes))])
@@ -546,13 +546,12 @@ def get_summary_by_week(year, month):
 
                     trx_summary_query = text(f"""
                         SELECT 
-                            COALESCE(COUNT(kode), 0) as jumlah,
-                            COALESCE(SUM(harga), 0) as omset,
-                            COALESCE(SUM(harga - harga_beli), 0) as profit
-                        FROM transaksi 
+                            COALESCE(COUNT(*), 0) AS jumlah,
+                            COALESCE(SUM(harga), 0) AS omset,
+                            COALESCE(SUM(harga - harga_beli), 0) AS profit
+                        FROM transaksi
                         WHERE kode_reseller IN ({placeholders})
-                            AND tgl_entri >= :start_dt
-                            AND tgl_entri <= :end_dt
+                          AND tgl_entri BETWEEN :start_dt AND :end_dt
                     """)
 
                     trx_result = db.session.execute(trx_summary_query, params).fetchone()
@@ -576,16 +575,23 @@ def get_summary_by_week(year, month):
                     "akuisisi_aktif": int(akuisisi_aktif),
                     "omset": total_omset,
                     "profit_upline": total_profit,
-                    "insentif": insentif_detail["total_insentif"],
+                    "insentif": float(insentif_detail["total_insentif"]),
                     "insentif_detail": insentif_detail,
                     "start": start_dt.isoformat(timespec="seconds"),
                     "end": end_dt.isoformat(timespec="seconds"),
                 })
 
-        return results
+        return {
+            "page": page,
+            "per_page": per_page,
+            "total_roots": total_roots,
+            "total_pages": (total_roots + per_page - 1) // per_page,
+            "data": results
+        }
+
     except Exception as e:
         print(f"Error in get_summary_by_week: {str(e)}")
-        return []
+        return {"page": page, "per_page": per_page, "total_roots": 0, "total_pages": 0, "data": []}
 
 def compare_months(year1, month1, year2, month2):
     """Bandingkan summary bulan1 vs bulan2 (per minggu, per upline)"""
