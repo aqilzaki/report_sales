@@ -142,7 +142,7 @@ API Laporan Penjualan adalah layanan *backend* yang dibangun menggunakan Python 
 
 ### Laporan
 
-  * `GET /report/profit-hirarki`: Mendapatkan hierarki *reseller* dengan profit.
+  * `GET /report/hierarchy`: Mendapatkan hierarki *reseller* dengan profit.
   * `GET /report/summary`: Mendapatkan ringkasan transaksi *reseller* dengan filter periode.
   * `GET /report/summary/self`: Mendapatkan ringkasan transaksi untuk 1 *upline* (diri sendiri).
   * `GET /report/summary/weekly`: Mendapatkan ringkasan per minggu untuk semua *upline*.
