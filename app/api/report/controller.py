@@ -615,12 +615,16 @@ def get_summary_by_week(year, month, page: int = 1, limit: int = 50):
 def compare_months(year1, month1, year2, month2):
     """Bandingkan summary bulan1 vs bulan2 (per minggu, per upline)"""
     try:
-        data1 = get_summary_by_week(year1, month1)
-        data2 = get_summary_by_week(year2, month2)
+        result1 = get_summary_by_week(year1, month1)
+        result2 = get_summary_by_week(year2, month2)
+
+        # Ambil hanya list data
+        data1 = result1.get("data", []) if isinstance(result1, dict) else result1
+        data2 = result2.get("data", []) if isinstance(result2, dict) else result2
 
         comparison = {}
         
-        # Process data1 first
+        # Process data1 dulu
         for d in data1:
             key = (d["id_upline"], d["week"])
             comparison[key] = {
@@ -688,6 +692,7 @@ def compare_months(year1, month1, year2, month2):
                 comparison[key]["month2"] = month2_data
 
         return list(comparison.values())
+
     except Exception as e:
         print(f"Error in compare_months: {str(e)}")
         return []
