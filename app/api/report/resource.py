@@ -11,21 +11,35 @@ api = ReportDto.api
 class ReportHierarchy(Resource):
     @api.marshal_with(ReportDto.response_hierarchy)
     @api.doc('get_hierarchy', 
-             description='Ambil struktur upline-downline beserta profit transaksi')
+             description='Ambil struktur upline-downline beserta profit transaksi dengan pagination',
+             params={
+                 'page': 'Halaman yang diminta (default: 1)',
+                 'limit': 'Jumlah data per halaman (default: 10, max: 50)'
+             })
     def get(self):
         """Ambil struktur upline–downline beserta profit transaksi"""
         try:
-            data = ctrl.get_reseller_hierarchy_with_profit()
-            if not data:
+            page = request.args.get("page", type=int, default=1)
+            limit = min(request.args.get("limit", type=int, default=10), 50)  # Max 50
+            
+            result = ctrl.get_reseller_hierarchy_with_profit(page=page, limit=limit)
+            
+            if not result["data"]:
                 return {
                     "status": "error", 
                     "message": "Tidak ada data ditemukan", 
+                    "pagination": {"page": page, "limit": limit, "total": 0, "total_pages": 0},
                     "data": []
                 }, 404
+                
             return {
                 "status": "success", 
-                "message": "Laporan hierarchy berhasil diambil", 
-                "data": data
+                "message": f"Laporan hierarchy halaman {page} berhasil diambil", 
+                "pagination": {
+                    "page": result["page"], "limit": result["limit"], 
+                    "total": result["total"], "total_pages": result["total_pages"]
+                },
+                "data": result["data"]
             }, 200
         except Exception as e:
             return {
@@ -34,7 +48,7 @@ class ReportHierarchy(Resource):
                 "error": str(e)
             }, 500
 
-# ================= RESELLER SUMMARY =================
+# ================= RESELLER SUMMARY (unchanged - sudah benar) =================
 
 @api.route("/reseller/summary/custom")
 class ResellerSummaryCustomResource(Resource):
@@ -46,8 +60,8 @@ class ResellerSummaryCustomResource(Resource):
                  'month': 'Bulan 1-12 (wajib untuk month/week)',
                  'day': 'Tanggal format YYYY-MM-DD (untuk period=day)',
                  'week': 'Minggu ke-N dalam bulan (untuk period=week)',
-                 'page': 'Halaman yang diminta',
-                 'limit': 'Jumlah data per halaman'
+                 'page': 'Halaman yang diminta (default: 1)',
+                 'limit': 'Jumlah data per halaman (default: 25, max: 100)'
              })
     def get(self):
         """Ambil ringkasan reseller dengan filter hari/bulan/minggu"""
@@ -58,7 +72,7 @@ class ResellerSummaryCustomResource(Resource):
             day = request.args.get("day")
             week = request.args.get("week", type=int)
             page = request.args.get("page", type=int, default=1)
-            limit = request.args.get("limit", type=int, default=25)
+            limit = min(request.args.get("limit", type=int, default=25), 100)  # Max 100
 
             data = ctrl.get_reseller_summary_custom(
                 period=period, year=year, month=month, day=day, week=week, page=page, limit=limit
@@ -66,7 +80,7 @@ class ResellerSummaryCustomResource(Resource):
             
             return {
                 "status": "success",
-                "message": f"Data summary {period} berhasil diambil",
+                "message": f"Data summary {period} halaman {page} berhasil diambil",
                 "data": data
             }, 200
             
@@ -83,7 +97,7 @@ class ResellerSummaryCustomResource(Resource):
                 "error": str(e)
             }, 500
 
-# ================= SELF SUMMARY =================
+# ================= SELF SUMMARY (unchanged - sudah benar) =================
 
 @api.route("/self/summary")
 class SelfSummaryResource(Resource):
@@ -150,7 +164,7 @@ class SelfSummaryResource(Resource):
                 "error": str(e)
             }, 500
 
-# ================= ADMIN WEEKLY SUMMARY =================
+# ================= ADMIN WEEKLY SUMMARY WITH PAGINATION =================
 
 @api.route("/admin/summary/week")
 class WeeklySummaryResource(Resource):
@@ -158,19 +172,23 @@ class WeeklySummaryResource(Resource):
     @api.doc('get_weekly_summary',
              params={
                  'year': 'Tahun (wajib)',
-                 'month': 'Bulan 1-12 (wajib)'
+                 'month': 'Bulan 1-12 (wajib)',
+                 'page': 'Halaman yang diminta (default: 1)',
+                 'limit': 'Jumlah data per halaman (default: 25, max: 100)'
              })
     def get(self):
         """Ambil ringkasan per minggu untuk semua upline (Admin only)"""
         try:
             year = request.args.get("year", type=int)
             month = request.args.get("month", type=int)
+            page = request.args.get("page", type=int, default=1)
+            limit = min(request.args.get("limit", type=int, default=25), 100)  # Max 100
             
             if not year or not month:
                 return {
                     "status": "error",
                     "message": "Parameter year dan month wajib diisi",
-                    "error": "Contoh: /admin/summary/week?year=2024&month=1"
+                    "error": "Contoh: /admin/summary/week?year=2024&month=1&page=1&limit=25"
                 }, 400
 
             if month < 1 or month > 12:
@@ -180,12 +198,16 @@ class WeeklySummaryResource(Resource):
                     "error": f"Month yang diberikan: {month}"
                 }, 400
 
-            data = ctrl.get_summary_by_week(year, month)
+            result = ctrl.get_summary_by_week(year, month, page, limit)
             
             return {
                 "status": "success",
-                "message": f"Data summary mingguan bulan {month}/{year} berhasil diambil",
-                "data": data
+                "message": f"Data summary mingguan {month}/{year} halaman {page} berhasil diambil",
+                "pagination": {
+                    "page": result["page"], "limit": result["limit"],
+                    "total_roots": result["total_roots"], "total_pages": result["total_pages"]
+                },
+                "data": result["data"]
             }, 200
             
         except ValueError as e:
@@ -201,7 +223,7 @@ class WeeklySummaryResource(Resource):
                 "error": str(e)
             }, 500
 
-# ================= ADMIN MONTHLY COMPARE =================
+# ================= ADMIN MONTHLY COMPARE WITH PAGINATION =================
 
 @api.route("/admin/summary/compare")
 class CompareSummaryResource(Resource):
@@ -211,7 +233,9 @@ class CompareSummaryResource(Resource):
                  'year1': 'Tahun pertama (wajib)',
                  'month1': 'Bulan pertama 1-12 (wajib)',
                  'year2': 'Tahun kedua (wajib)',
-                 'month2': 'Bulan kedua 1-12 (wajib)'
+                 'month2': 'Bulan kedua 1-12 (wajib)',
+                 'page': 'Halaman yang diminta (default: 1)',
+                 'limit': 'Jumlah data per halaman (default: 25, max: 100)'
              })
     def get(self):
         """Bandingkan 2 bulan (per minggu) - Admin only"""
@@ -220,13 +244,15 @@ class CompareSummaryResource(Resource):
             month1 = request.args.get("month1", type=int)
             year2 = request.args.get("year2", type=int)
             month2 = request.args.get("month2", type=int)
+            page = request.args.get("page", type=int, default=1)
+            limit = min(request.args.get("limit", type=int, default=25), 100)  # Max 100
             
             # Validasi parameter
             if not all([year1, month1, year2, month2]):
                 return {
                     "status": "error",
                     "message": "Parameter year1, month1, year2, month2 wajib diisi",
-                    "error": "Contoh: /admin/summary/compare?year1=2024&month1=1&year2=2024&month2=2"
+                    "error": "Contoh: /admin/summary/compare?year1=2024&month1=1&year2=2024&month2=2&page=1&limit=25"
                 }, 400
 
             # Validasi range bulan
@@ -237,12 +263,16 @@ class CompareSummaryResource(Resource):
                     "error": f"Month1: {month1}, Month2: {month2}"
                 }, 400
 
-            data = ctrl.compare_months(year1, month1, year2, month2)
+            result = ctrl.compare_months(year1, month1, year2, month2, page, limit)
             
             return {
                 "status": "success",
-                "message": f"Perbandingan {month1}/{year1} vs {month2}/{year2} berhasil diambil",
-                "data": data
+                "message": f"Perbandingan {month1}/{year1} vs {month2}/{year2} halaman {page} berhasil diambil",
+                "pagination": {
+                    "page": result["page"], "limit": result["limit"],
+                    "total_roots": result["total_roots"], "total_pages": result["total_pages"]
+                },
+                "data": result["data"]
             }, 200
             
         except ValueError as e:
@@ -258,7 +288,7 @@ class CompareSummaryResource(Resource):
                 "error": str(e)
             }, 500
 
-# ================= DEBUG ENDPOINT (Optional) =================
+# ================= DEBUG ENDPOINT (Compact) =================
 
 @api.route("/debug/activity/<string:reseller_code>")
 class DebugActivityResource(Resource):

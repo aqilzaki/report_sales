@@ -3,6 +3,14 @@ from flask_restx import Namespace, fields
 class ReportDto:
     api = Namespace("report", description="Laporan Reseller")
 
+    # ======================== PAGINATION MODEL ========================
+    pagination = api.model("Pagination", {
+        "page": fields.Integer(description="Halaman saat ini"),
+        "limit": fields.Integer(description="Jumlah data per halaman"),
+        "total": fields.Integer(description="Total data"),
+        "total_pages": fields.Integer(description="Total halaman")
+    })
+
     # ======================== BASIC MODELS ========================
     
     # Model untuk detail insentif
@@ -39,7 +47,7 @@ class ReportDto:
 
     # ======================== DATA MODELS ========================
 
-    # Untuk summary custom (sudah ada)
+    # Untuk summary custom
     reseller_summary_dto = api.model("ResellerSummary", {
         "id_upline": fields.String(description="Kode upline"),
         "nama_upline": fields.String(description="Nama upline"),
@@ -56,7 +64,7 @@ class ReportDto:
         "end": fields.String(description="Tanggal akhir periode"),
     })
 
-    # Untuk self summary (1 upline)
+    # Untuk self summary
     self_summary_dto = api.model("SelfSummary", {
         "id_upline": fields.String(description="Kode upline"),
         "nama_upline": fields.String(description="Nama upline"),
@@ -73,7 +81,7 @@ class ReportDto:
         "end": fields.String(description="Tanggal akhir periode"),
     })
 
-    # Untuk summary mingguan (per week)
+    # Untuk summary mingguan
     weekly_summary_dto = api.model("WeeklySummary", {
         "id_upline": fields.String(description="Kode upline"),
         "nama_upline": fields.String(description="Nama upline"),
@@ -120,40 +128,43 @@ class ReportDto:
         "downlines": fields.List(fields.Nested(downline_info), description="List downlines")
     })
 
-    # ======================== RESPONSE WRAPPERS ========================
+    # ======================== RESPONSE WRAPPERS WITH PAGINATION ========================
 
-    # Response untuk hierarchy
+    # Response untuk hierarchy dengan pagination
     response_hierarchy = api.model("ResponseHierarchy", {
         "status": fields.String(description="Status response", example="success"),
         "message": fields.String(description="Pesan response", example="Data berhasil diambil"),
+        "pagination": fields.Nested(pagination, description="Info pagination"),
         "data": fields.List(fields.Nested(hierarchy_data), description="Data hierarchy reseller")
     })
 
-    # Response untuk summary custom (list)
+    # Response untuk summary custom (tanpa pagination di response karena data langsung dari controller)
     response_reseller_summary = api.model("ResponseResellerSummary", {
         "status": fields.String(description="Status response", example="success"),
         "message": fields.String(description="Pesan response", example="Data summary berhasil diambil"),
         "data": fields.List(fields.Nested(reseller_summary_dto), description="List summary reseller")
     })
 
-    # Response untuk self summary (single object)
+    # Response untuk self summary (single object, no pagination)
     response_self_summary = api.model("ResponseSelfSummary", {
         "status": fields.String(description="Status response", example="success"),
         "message": fields.String(description="Pesan response", example="Data summary pribadi berhasil diambil"),
         "data": fields.Nested(self_summary_dto, description="Summary reseller pribadi")
     })
 
-    # Response untuk weekly summary (list)
+    # Response untuk weekly summary dengan pagination
     response_weekly_summary = api.model("ResponseWeeklySummary", {
         "status": fields.String(description="Status response", example="success"),
         "message": fields.String(description="Pesan response", example="Data summary mingguan berhasil diambil"),
+        "pagination": fields.Nested(pagination, description="Info pagination"),
         "data": fields.List(fields.Nested(weekly_summary_dto), description="List summary per minggu")
     })
 
-    # Response untuk monthly compare (list)
+    # Response untuk monthly compare dengan pagination
     response_monthly_compare = api.model("ResponseMonthlyCompare", {
         "status": fields.String(description="Status response", example="success"),
         "message": fields.String(description="Pesan response", example="Data perbandingan bulanan berhasil diambil"),
+        "pagination": fields.Nested(pagination, description="Info pagination"),
         "data": fields.List(fields.Nested(monthly_compare_dto), description="List perbandingan per bulan")
     })
 
