@@ -2,6 +2,7 @@ from flask_restx import Resource, Namespace
 from flask import request
 from .dto import ReportDto
 from . import controller as ctrl
+from app.api.report.dto import ReportDto
 
 api = ReportDto.api
 
@@ -171,14 +172,15 @@ class SelfSummaryResource(Resource):
             }, 500
 
 # ================= ADMIN WEEKLY SUMMARY =================
-
 @api.route("/admin/summary/week")
 class WeeklySummaryResource(Resource):
-    @api.marshal_with(ReportDto.response_weekly_summary)
+    @api.marshal_with(ReportDto.response_weekly_summary_paginated)
     @api.doc('get_weekly_summary',
              params={
                  'year': 'Tahun (wajib)',
-                 'month': 'Bulan 1-12 (wajib)'
+                 'month': 'Bulan 1-12 (wajib)',
+                 'page': 'Nomor halaman (opsional, default=1)',
+                 'limit': 'Jumlah data per halaman (opsional, default=10)',
              })
     def get(self):
         """Ambil ringkasan per minggu untuk semua upline (Admin only)"""
@@ -203,16 +205,16 @@ class WeeklySummaryResource(Resource):
             page = request.args.get("page", type=int, default=1)
             limit = request.args.get("limit", type=int, default=10)
 
+            result = ctrl.get_summary_by_week(year, month, page=page, limit=limit)
 
-            data = ctrl.get_summary_by_week(year, month, page=page, limit=limit)
-            
             return {
                 "status": "success",
                 "message": f"Data summary mingguan bulan {month}/{year} berhasil diambil",
-                "page": data.get("page", page),
-                "limit": data.get("limit", limit),
-                "total": data.get("total", 0),
-                "data": data
+                "page": result.get("page", page),
+                "per_page": result.get("limit", limit),
+                "total_roots": result.get("total", 0),
+                "total_pages": result.get("total_pages", 1),
+                "data": result.get("data", [])
             }, 200
             
         except ValueError as e:

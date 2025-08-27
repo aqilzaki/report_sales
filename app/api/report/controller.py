@@ -505,14 +505,14 @@ def get_self_summary(token, period="month", year=None, month=None, day=None, wee
         print(f"Error in get_self_summary: {str(e)}")
         return {"error": str(e)}
 
-def get_summary_by_week(year, month, page: int = 1, per_page: int = 50):
+def get_summary_by_week(year, month, page: int = 1, limit: int = 50):
     """Ambil summary per minggu untuk semua upline (support MySQL & MSSQL) dengan pagination di SQL langsung."""
     try:
         month_cal = calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
         results = []
 
         # Hitung offset
-        offset = (page - 1) * per_page
+        offset = (page - 1) * limit
 
         # Cek dialect (mysql / mssql)
         dialect = db.engine.dialect.name.lower()
@@ -536,7 +536,7 @@ def get_summary_by_week(year, month, page: int = 1, per_page: int = 50):
         else:
             raise Exception(f"Unsupported dialect: {dialect}")
 
-        root_results = db.session.execute(root_query, {"limit": per_page, "offset": offset}).fetchall()
+        root_results = db.session.execute(root_query, {"limit": limit, "offset": offset}).fetchall()
 
         # Hitung total untuk pagination
         count_query = text("""
@@ -602,15 +602,15 @@ def get_summary_by_week(year, month, page: int = 1, per_page: int = 50):
 
         return {
             "page": page,
-            "per_page": per_page,
+            "limit": limit,
             "total_roots": total_roots,
-            "total_pages": (total_roots + per_page - 1) // per_page,
+            "total_pages": (total_roots + limit - 1) // limit,
             "data": results
         }
 
     except Exception as e:
         print(f"Error in get_summary_by_week: {str(e)}")
-        return {"page": page, "per_page": per_page, "total_roots": 0, "total_pages": 0, "data": []}
+        return {"page": page, "limit": limit, "total_roots": 0, "total_pages": 0, "data": []}
 
 def compare_months(year1, month1, year2, month2):
     """Bandingkan summary bulan1 vs bulan2 (per minggu, per upline)"""
