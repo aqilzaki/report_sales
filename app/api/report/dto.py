@@ -179,3 +179,14 @@ class ReportDto:
     "total_pages": fields.Integer(description="Total halaman tersedia"),
     "data": fields.List(fields.Nested(weekly_summary_dto), description="List summary per minggu")
 })
+    
+    # Response dengan pagination monthly compare
+    response_monthly_compare_paginated = api.model("ResponseMonthlyComparePaginated", {
+    "status": fields.String(description="Status response", example="success"),
+    "message": fields.String(description="Pesan response", example="Data perbandingan bulanan berhasil diambil"),
+    "page": fields.Integer(description="Halaman saat ini"),
+    "per_page": fields.Integer(description="Jumlah data per halaman"),
+    "total_roots": fields.Integer(description="Total data root reseller"),
+    "total_pages": fields.Integer(description="Total halaman tersedia"),
+    "data": fields.List(fields.Nested(monthly_compare_dto), description="List perbandingan per bulan")
+})

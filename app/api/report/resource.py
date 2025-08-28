@@ -7,7 +7,6 @@ from app.api.report.dto import ReportDto
 api = ReportDto.api
 
 # ================= HIERARCHY =================
-
 @api.route("/hierarchy")
 class ReportHierarchy(Resource):
     @api.marshal_with(ReportDto.response_hierarchy)
@@ -56,7 +55,6 @@ class ReportHierarchy(Resource):
             }, 500
 
 # ================= RESELLER SUMMARY =================
-
 @api.route("/reseller/summary/custom")
 class ResellerSummaryCustomResource(Resource):
     @api.marshal_with(ReportDto.response_reseller_summary)
@@ -105,7 +103,6 @@ class ResellerSummaryCustomResource(Resource):
             }, 500
 
 # ================= SELF SUMMARY =================
-
 @api.route("/self/summary")
 class SelfSummaryResource(Resource):
     @api.marshal_with(ReportDto.response_self_summary)
@@ -231,16 +228,17 @@ class WeeklySummaryResource(Resource):
             }, 500
 
 # ================= ADMIN MONTHLY COMPARE =================
-
 @api.route("/admin/summary/compare")
 class CompareSummaryResource(Resource):
-    @api.marshal_with(ReportDto.response_monthly_compare)
+    @api.marshal_with(ReportDto.response_monthly_compare_paginated)
     @api.doc('compare_months',
              params={
                  'year1': 'Tahun pertama (wajib)',
                  'month1': 'Bulan pertama 1-12 (wajib)',
                  'year2': 'Tahun kedua (wajib)',
-                 'month2': 'Bulan kedua 1-12 (wajib)'
+                 'month2': 'Bulan kedua 1-12 (wajib)',
+                 'page': 'Nomor halaman (opsional, default=1)',
+                 'limit': 'Jumlah data per halaman (opsional, default=10)',
              })
     def get(self):
         """Bandingkan 2 bulan (per minggu) - Admin only"""
@@ -265,14 +263,12 @@ class CompareSummaryResource(Resource):
                     "message": "Parameter month1 dan month2 harus antara 1-12",
                     "error": f"Month1: {month1}, Month2: {month2}"
                 }, 400
-
-            data = ctrl.compare_months(year1, month1, year2, month2)
             
-            return {
-                "status": "success",
-                "message": f"Perbandingan {month1}/{year1} vs {month2}/{year2} berhasil diambil",
-                "data": data
-            }, 200
+            page = request.args.get("page", type=int, default=1)
+            limit = request.args.get("limit", type=int, default=10)
+
+            return ctrl.compare_months(year1, month1, year2, month2, page=page, limit=limit)
+            
             
         except ValueError as e:
             return {
@@ -288,7 +284,6 @@ class CompareSummaryResource(Resource):
             }, 500
 
 # ================= DEBUG ENDPOINT (Optional) =================
-
 @api.route("/debug/activity/<string:reseller_code>")
 class DebugActivityResource(Resource):
     @api.doc('debug_activity',

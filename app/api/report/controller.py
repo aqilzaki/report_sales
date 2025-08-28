@@ -612,19 +612,19 @@ def get_summary_by_week(year, month, page: int = 1, limit: int = 50):
         print(f"Error in get_summary_by_week: {str(e)}")
         return {"page": page, "limit": limit, "total_roots": 0, "total_pages": 0, "data": []}
 
-def compare_months(year1, month1, year2, month2):
-    """Bandingkan summary bulan1 vs bulan2 (per minggu, per upline)"""
+def compare_months(year1, month1, year2, month2, page: int = 1, limit: int = 50):
+    """Bandingkan summary bulan1 vs bulan2 (per minggu, per upline) dengan pagination"""
     try:
-        result1 = get_summary_by_week(year1, month1)
-        result2 = get_summary_by_week(year2, month2)
+        # Ambil data per bulan, tapi pake pagination langsung
+        result1 = get_summary_by_week(year1, month1, page=page, limit=limit)
+        result2 = get_summary_by_week(year2, month2, page=page, limit=limit)
 
-        # Ambil hanya list data
         data1 = result1.get("data", []) if isinstance(result1, dict) else result1
         data2 = result2.get("data", []) if isinstance(result2, dict) else result2
 
         comparison = {}
         
-        # Process data1 dulu
+        # Gabung data bulan pertama
         for d in data1:
             key = (d["id_upline"], d["week"])
             comparison[key] = {
@@ -655,7 +655,7 @@ def compare_months(year1, month1, year2, month2):
                 },
             }
 
-        # Process data2
+        # Gabung data bulan kedua
         for d in data2:
             key = (d["id_upline"], d["week"])
             month2_data = {
@@ -691,11 +691,29 @@ def compare_months(year1, month1, year2, month2):
             else:
                 comparison[key]["month2"] = month2_data
 
-        return list(comparison.values())
+        # Kembalikan hasil + metadata pagination
+        return {
+            "status": "success",
+            "message": f"Data perbandingan bulanan berhasil diambil",
+            "page": page,
+            "per_page": limit, # Ubah 'limit' menjadi 'per_page'
+            "total_roots": max(result1.get("total_roots", 0), result2.get("total_roots", 0)),
+            "total_pages": max(result1.get("total_pages", 0), result2.get("total_pages", 0)),
+            "data": list(comparison.values())
+        }
 
     except Exception as e:
         print(f"Error in compare_months: {str(e)}")
-        return []
+        return {
+            "status": "error",
+            "message": "Gagal membandingkan summary",
+            "error": str(e),
+            "page": page,
+            "limit": limit,
+            "total_roots": 0,
+            "total_pages": 0,
+            "data": []
+        }
 
 # ======================== UTILITY FUNCTIONS ========================
 
