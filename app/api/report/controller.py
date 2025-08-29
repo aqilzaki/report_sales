@@ -1,118 +1,42 @@
 from app.models import Reseller, Transaksi
 import jwt
 from app.database import db
-from sqlalchemy import func, case, and_, distinct, text
+from sqlalchemy import text
 from datetime import datetime, timedelta, date
 from flask import current_app
-import calendar
-from app.api.auth.controller import get_user_from_token
 from decimal import Decimal
+import calendar
+from collections import defaultdict
 
+# ======================== UTIL DIALECT & HELPERS ========================
 
-def get_reseller_hierarchy_with_profit():
-    """Ambil semua reseller root, cek downline, dan hitung profit per downline lalu akumulasi ke upline"""
-    try:
-        print("=== DEBUG HIERARCHY ===")
-        
-        # Debug: Cek struktur tabel reseller dulu
-        print("Checking table structure...")
-        
-        # 1. Cari reseller yang tidak punya upline (root) -> pakai TOP untuk SQL Server
-        root_query = text("""
-            SELECT TOP 10 kode, nama, kode_upline
-            FROM reseller
-            WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
-            ORDER BY kode
-        """)
-        
-        root_results = db.session.execute(root_query).fetchall()
-        print(f"Found {len(root_results)} potential roots")
-        
-        if not root_results:
-            # Jika tidak ada root, coba ambil sample reseller (TOP 5)
-            sample_query = text("""
-                SELECT TOP 5 kode, nama, kode_upline 
-                FROM reseller
-                ORDER BY kode
-            """)
-            sample_results = db.session.execute(sample_query).fetchall()
-            print("Sample resellers:")
-            for r in sample_results:
-                print(f"  Kode: {r[0]}, Nama: {r[1]}, Upline: {r[2]}")
-            return []
+def _dialect():
+    return db.engine.dialect.name.lower()
 
-        hasil = []
-        for root_row in root_results:
-            root_kode = root_row[0]
-            root_nama = root_row[1]
-            print(f"\nProcessing root: {root_kode} - {root_nama}")
-            
-            # 2. Cari downlines untuk root ini
-            downline_query = text("""
-                SELECT kode, nama 
-                FROM reseller 
-                WHERE kode_upline = :upline_kode
-            """)
-            
-            downline_results = db.session.execute(
-                downline_query, 
-                {'upline_kode': root_kode}
-            ).fetchall()
-            
-            print(f"  Found {len(downline_results)} downlines")
+def _is_mssql():
+    d = _dialect()
+    return d in ("mssql", "microsoft sql server")
 
-            downline_data = []
-            total_profit_upline = 0.0
+def _date_expr(col="tgl_entri"):
+    # Ekspresi SQL untuk cast ke DATE per-dialect
+    if _is_mssql():
+        return f"CAST({col} AS DATE)"
+    return f"DATE({col})"
 
-            for downline_row in downline_results:
-                downline_kode = downline_row[0]
-                downline_nama = downline_row[1]
-                print(f"    Processing downline: {downline_kode}")
-                
-                # 3. Hitung profit untuk downline ini
-                profit_query = text("""
-                    SELECT 
-                        COALESCE(SUM(harga - harga_beli), 0) as profit,
-                        COALESCE(COUNT(kode), 0) as jumlah_transaksi
-                    FROM transaksi 
-                    WHERE kode_reseller = :reseller_kode
-                """)
-                
-                profit_result = db.session.execute(
-                    profit_query, 
-                    {'reseller_kode': downline_kode}
-                ).fetchone()
+def _paginate_root(limit, offset):
+    if _is_mssql():
+        return f"ORDER BY kode OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY"
+    return f"ORDER BY kode LIMIT :limit OFFSET :offset"
 
-                profit_downline = float(profit_result[0] or 0)
-                jumlah_transaksi = int(profit_result[1] or 0)
-                total_profit_upline += profit_downline
-                
-                print(f"      Transactions: {jumlah_transaksi}, Profit: {profit_downline}")
-
-                downline_data.append({
-                    "kode": downline_kode,
-                    "nama": downline_nama,
-                    "jumlah_transaksi": jumlah_transaksi,
-                    "total_profit": profit_downline,
-                })
-
-            hasil.append({
-                "upline": {
-                    "kode": root_kode,
-                    "nama": root_nama,
-                    "total_profit": float(total_profit_upline),
-                },
-                "downlines": downline_data,
-            })
-
-        print(f"\nReturning {len(hasil)} results")
-        return hasil
-        
-    except Exception as e:
-        print(f"Error in get_reseller_hierarchy_with_profit: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return []
+def _placeholders(prefix, values):
+    # Buat placeholder named params untuk IN (...) aman
+    names = []
+    params = {}
+    for i, v in enumerate(values):
+        key = f"{prefix}_{i}"
+        names.append(f":{key}")
+        params[key] = v
+    return ", ".join(names), params
 
 # ======================== PERIOD FILTER ========================
 
@@ -135,11 +59,9 @@ def _get_period_range(period: str, year=None, month=None, day=None, week=None):
         elif period == "week":
             if not year or not month or not week:
                 raise ValueError("year, month, dan week harus diisi untuk period=week")
-
-            month_cal = calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)  
+            month_cal = calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
             if week < 1 or week > len(month_cal):
                 raise ValueError(f"Bulan {month}/{year} hanya punya {len(month_cal)} minggu")
-
             week_days = month_cal[week - 1]
             start = datetime.combine(week_days[0], datetime.min.time())
             end = datetime.combine(week_days[-1], datetime.max.time())
@@ -155,13 +77,11 @@ def _get_period_range(period: str, year=None, month=None, day=None, week=None):
 # ======================== INSENTIF CALCULATION =======================
 
 def calculate_insentif(profit):
-    # Pastikan profit dalam Decimal
     profit = Decimal(profit)
-
     basic_salary = Decimal(3_000_000)
     q1 = q2 = q3 = q4 = q5 = Decimal(0)
     bonus_ekstra = Decimal(0)
-    
+
     if profit <= Decimal(3_000_000):
         return {
             "basic_salary": int(basic_salary),
@@ -171,37 +91,27 @@ def calculate_insentif(profit):
             "total_salary": int(basic_salary)
         }
 
-    # Q1: 3jt - 10jt (10%)
     if profit > Decimal(3_000_000):
         q1_max = min(profit, Decimal(10_000_000))
         q1 = (q1_max - Decimal(3_000_000)) * Decimal("0.10")
-    
-    # Q2: 10jt - 15jt (20%)
     if profit > Decimal(10_000_000):
         q2_max = min(profit, Decimal(15_000_000))
         q2 = (q2_max - Decimal(10_000_000)) * Decimal("0.20")
-    
-    # Q3: 15jt - 20jt (30%)
     if profit > Decimal(15_000_000):
         q3_max = min(profit, Decimal(20_000_000))
         q3 = (q3_max - Decimal(15_000_000)) * Decimal("0.30")
-    
-    # Q4: 20jt - 25jt (40%)
     if profit > Decimal(20_000_000):
         q4_max = min(profit, Decimal(25_000_000))
         q4 = (q4_max - Decimal(20_000_000)) * Decimal("0.40")
-    
-    # Q5: 25jt+ (50%)
     if profit > Decimal(25_000_000):
         q5 = (profit - Decimal(25_000_000)) * Decimal("0.50")
-    
-    # Bonus ekstra jika profit > 10jt
+
     if profit > Decimal(10_000_000):
         bonus_ekstra = Decimal(700_000)
-    
+
     total_insentif = q1 + q2 + q3 + q4 + q5 + bonus_ekstra
     total_salary = basic_salary + total_insentif
-    
+
     return {
         "basic_salary": int(basic_salary),
         "q1": int(q1),
@@ -214,214 +124,324 @@ def calculate_insentif(profit):
         "total_salary": int(total_salary)
     }
 
-# ======================== HELPER FUNCTIONS FOR ACTIVITY CHECK ========================
+# ======================== BATCH ACTIVITY CHECKS ========================
+
+def _batch_daily_counts(reseller_codes, start_dt, end_dt):
+    """
+    Tarik agregasi harian untuk banyak reseller sekaligus:
+    return dict: {kode_reseller: {date: count, ...}, ...}
+    """
+    if not reseller_codes:
+        return {}
+
+    date_col = _date_expr("t.tgl_entri")
+    placeholders, params = _placeholders("code", reseller_codes)
+    params.update({"start_dt": start_dt, "end_dt": end_dt})
+
+    sql = text(f"""
+        SELECT 
+            t.kode_reseller,
+            {date_col} AS trx_date,
+            COUNT(t.kode) AS daily_count
+        FROM transaksi t
+        WHERE t.kode_reseller IN ({placeholders})
+          AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
+        GROUP BY t.kode_reseller, {date_col}
+        ORDER BY t.kode_reseller, {date_col}
+    """)
+
+    rows = db.session.execute(sql, params).fetchall()
+    result = defaultdict(dict)
+    for kode, trx_date, cnt in rows:
+        result[kode][trx_date] = cnt
+    return result
+
+def _has_no_15_day_gap(daily_transactions, start_dt, end_dt):
+    """Cek apakah tidak ada gap 15 hari berturut-turut tanpa transaksi"""
+    if not daily_transactions:
+        return False
+    try:
+        transaction_dates = sorted(daily_transactions.keys())
+        first_trx_date = transaction_dates[0]
+        if (first_trx_date - start_dt.date()).days >= 15:
+            return False
+        for i in range(len(transaction_dates) - 1):
+            current_date = transaction_dates[i]
+            next_date = transaction_dates[i + 1]
+            gap_days = (next_date - current_date).days - 1
+            if gap_days >= 15:
+                return False
+        last_trx_date = transaction_dates[-1]
+        if (end_dt.date() - last_trx_date).days >= 15:
+            return False
+        return True
+    except Exception as e:
+        print(f"Error in _has_no_15_day_gap: {str(e)}")
+        return False
 
 def _count_active_resellers(reseller_codes, start_dt, end_dt):
     """
-    Hitung reseller aktif berdasarkan kriteria:
-    1. Pernah melakukan minimal 3 transaksi dalam sehari
-    2. Tidak ada gap 15 hari berturut-turut tanpa transaksi
+    Reseller aktif:
+    1) Ada minimal 3 transaksi pada salah satu hari dalam periode
+    2) Tidak ada gap >= 15 hari tanpa transaksi
+    Dibatch supaya 1 query, sisanya proses di Python.
     """
     if not reseller_codes:
         return 0
-    
-    active_count = 0
-    
     try:
-        for reseller_code in reseller_codes:
-            # Query dengan raw SQL untuk lebih aman
-            daily_trx_query = text("""
-              SELECT 
-                CAST(tgl_entri AS DATE) as trx_date,
-                COUNT(kode) as daily_count
-                FROM transaksi 
-                WHERE kode_reseller = :reseller_code
-                    AND tgl_entri >= :start_dt
-                    AND tgl_entri <= :end_dt
-                GROUP BY CAST(tgl_entri AS DATE)
-
-
-            """)
-            
-            trx_results = db.session.execute(daily_trx_query, {
-                'reseller_code': reseller_code,
-                'start_dt': start_dt,
-                'end_dt': end_dt
-            }).fetchall()
-            
-            if not trx_results:
+        daily = _batch_daily_counts(reseller_codes, start_dt, end_dt)
+        active = 0
+        for kode in reseller_codes:
+            d = daily.get(kode, {})
+            if not d:
                 continue
-                
-            daily_transactions = {row[0]: row[1] for row in trx_results}
-            
-            # Cek kriteria 1: apakah ada hari dengan >= 3 transaksi
-            has_min_daily_trx = any(count >= 3 for count in daily_transactions.values())
-            
-            if not has_min_daily_trx:
+            has_min_daily = any(cnt >= 3 for cnt in d.values())
+            if not has_min_daily:
                 continue
-                
-            # Cek kriteria 2: apakah tidak ada gap 15 hari tanpa transaksi
-            if _has_no_15_day_gap(daily_transactions, start_dt, end_dt):
-                active_count += 1
-        
-        return active_count
+            if _has_no_15_day_gap(d, start_dt, end_dt):
+                active += 1
+        return active
     except Exception as e:
         print(f"Error in _count_active_resellers: {str(e)}")
         return 0
 
 def _count_acquisition_active_resellers(reseller_codes, start_dt, end_dt):
     """
-    Hitung reseller akuisisi aktif:
-    1. Memiliki >= 3 total transaksi dalam periode
-    2. Memenuhi kriteria aktif
+    Akuisisi aktif:
+    1) Total transaksi >= 3 dalam periode
+    2) Memenuhi kriteria aktif
     """
     if not reseller_codes:
         return 0
-    
     try:
-        # Buat placeholder untuk IN clause
-        placeholders = ','.join([f':code_{i}' for i in range(len(reseller_codes))])
-        params = {f'code_{i}': code for i, code in enumerate(reseller_codes)}
-        params.update({
-            'start_dt': start_dt,
-            'end_dt': end_dt
-        })
-        
-        min_trx_query = text(f"""
-            SELECT kode_reseller
-            FROM transaksi 
-            WHERE kode_reseller IN ({placeholders})
-                AND tgl_entri >= :start_dt
-                AND tgl_entri <= :end_dt
-            GROUP BY kode_reseller
-            HAVING COUNT(kode) >= 3
+        placeholders, params = _placeholders("code", reseller_codes)
+        params.update({"start_dt": start_dt, "end_dt": end_dt})
+
+        min_trx_sql = text(f"""
+            SELECT t.kode_reseller, COUNT(t.kode) AS total_trx
+            FROM transaksi t
+            WHERE t.kode_reseller IN ({placeholders})
+              AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
+            GROUP BY t.kode_reseller
+            HAVING COUNT(t.kode) >= 3
         """)
-        
-        qualified_results = db.session.execute(min_trx_query, params).fetchall()
-        qualified_resellers = [r[0] for r in qualified_results]
-        
-        if not qualified_resellers:
+        qualified = [r[0] for r in db.session.execute(min_trx_sql, params).fetchall()]
+        if not qualified:
             return 0
-        
-        return _count_active_resellers(qualified_resellers, start_dt, end_dt)
+        return _count_active_resellers(qualified, start_dt, end_dt)
     except Exception as e:
         print(f"Error in _count_acquisition_active_resellers: {str(e)}")
         return 0
 
-def _has_no_15_day_gap(daily_transactions, start_dt, end_dt):
-    """Cek apakah tidak ada gap 15 hari berturut-turut tanpa transaksi"""
-    if not daily_transactions:
-        return False
-    
+# ======================== HIERARCHY WITH PROFIT ========================
+def get_reseller_hierarchy_with_profit(page=1, limit=10):
     try:
-        transaction_dates = sorted(daily_transactions.keys())
-        
-        # Cek gap dari start_dt ke transaksi pertama
-        first_trx_date = transaction_dates[0]
-        if (first_trx_date - start_dt.date()).days >= 15:
-            return False
-        
-        # Cek gap antar transaksi
-        for i in range(len(transaction_dates) - 1):
-            current_date = transaction_dates[i]
-            next_date = transaction_dates[i + 1]
-            gap_days = (next_date - current_date).days - 1
-            
-            if gap_days >= 15:
-                return False
-        
-        # Cek gap dari transaksi terakhir ke end_dt
-        last_trx_date = transaction_dates[-1]
-        if (end_dt.date() - last_trx_date).days >= 15:
-            return False
-        
-        return True
+        offset = (page - 1) * limit
+        start = offset + 1
+        end = offset + limit
+
+        # Roots dengan pagination pakai ROW_NUMBER
+        root_sql = text(f"""
+            WITH RootReseller AS (
+                SELECT 
+                    kode, nama, kode_upline,
+                    ROW_NUMBER() OVER (ORDER BY kode) AS rn
+                FROM reseller
+                WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+            )
+            SELECT kode, nama, kode_upline
+            FROM RootReseller
+            WHERE rn BETWEEN :start AND :end
+            ORDER BY rn
+        """)
+        roots = db.session.execute(root_sql, {"start": start, "end": end}).fetchall()
+        if not roots:
+            return {"page": page, "limit": limit, "total": 0, "data": []}
+
+        root_codes = [r[0] for r in roots]
+
+        # Ambil semua downline untuk roots
+        ph, params = _placeholders("root", root_codes)
+        down_sql = text(f"""
+            SELECT d.kode_upline AS root_kode, d.kode AS down_kode, d.nama AS down_nama
+            FROM reseller d
+            WHERE d.kode_upline IN ({ph})
+        """)
+        down_rows = db.session.execute(down_sql, params).fetchall()
+
+        root_to_down = defaultdict(list)
+        all_down_codes = []
+        for root_kode, down_kode, down_nama in down_rows:
+            root_to_down[root_kode].append((down_kode, down_nama))
+            all_down_codes.append(down_kode)
+
+        profit_map = {}
+        if all_down_codes:
+            ph2, params2 = _placeholders("dcode", all_down_codes)
+            profit_sql = text(f"""
+                SELECT t.kode_reseller, 
+                       COALESCE(COUNT(t.kode), 0) AS jumlah_trx,
+                       COALESCE(SUM(t.harga - t.harga_beli), 0) AS profit
+                FROM transaksi t
+                WHERE t.kode_reseller IN ({ph2})
+                GROUP BY t.kode_reseller
+            """)
+            for kode_reseller, jml, profit in db.session.execute(profit_sql, params2).fetchall():
+                profit_map[kode_reseller] = (int(jml or 0), float(profit or 0.0))
+
+        data = []
+        for kode, nama, _ in roots:
+            downlines = []
+            total_profit_upline = 0.0
+            for dkode, dnama in root_to_down.get(kode, []):
+                jml, prof = profit_map.get(dkode, (0, 0.0))
+                total_profit_upline += prof
+                downlines.append({
+                    "kode": dkode,
+                    "nama": dnama,
+                    "jumlah_transaksi": jml,
+                    "total_profit": prof,
+                })
+            data.append({
+                "upline": {"kode": kode, "nama": nama, "total_profit": float(total_profit_upline)},
+                "downlines": downlines
+            })
+
+        total_sql = text("""
+            SELECT COUNT(*)
+            FROM reseller
+            WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+        """)
+        total_roots = db.session.execute(total_sql).scalar()
+
+        return {"page": page, "limit": limit, "total": int(total_roots or 0), "data": data}
+
     except Exception as e:
-        print(f"Error in _has_no_15_day_gap: {str(e)}")
-        return False
+        import traceback
+        traceback.print_exc()
+        return {"page": page, "limit": limit, "total": 0, "data": []}
 
-# ======================== MAIN SUMMARY ========================
+#========================= main custom summary ====================
 
-def get_reseller_summary_custom(period="month", year=None, month=None, day=None, week=None, page=None, limit=None):
+def get_reseller_summary_custom(period="month", year=None, month=None, day=None, week=None, page=1, limit=50):
     try:
         start_dt, end_dt = _get_period_range(period, year, month, day, week)
         offset = (page - 1) * limit
-        dialect = db.engine.dialect.name.lower()
-        print(f"Database dialect: {dialect}")
+        start = offset + 1
+        end = offset + limit
 
-        if dialect == "mssql":
-            query = text(f"""
-                WITH root_reseller AS (
-                    SELECT 
-                        kode, nama,
-                        ROW_NUMBER() OVER (ORDER BY kode) AS rn
-                    FROM reseller
-                    WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
-                )
+        # Ambil roots paginated pakai ROW_NUMBER
+        root_sql = text(f"""
+            WITH RootReseller AS (
                 SELECT 
-                    r.kode AS id_upline,
-                    r.nama AS nama_upline,
-                    COUNT(DISTINCT d.kode) AS akuisisi,
-                    COALESCE(COUNT(t.kode), 0) AS jmlh_trx,
-                    COALESCE(SUM(t.harga), 0) AS omset,
-                    COALESCE(SUM(t.harga - t.harga_beli), 0) AS profit_upline
-                FROM root_reseller r
-                LEFT JOIN reseller d ON d.kode_upline = r.kode
-                LEFT JOIN transaksi t 
-                    ON t.kode_reseller = d.kode
-                    AND t.tgl_entri >= :start_dt
-                    AND t.tgl_entri <= :end_dt
-                WHERE r.rn BETWEEN :offset+1 AND :offset+:limit
-                GROUP BY r.kode, r.nama, r.rn
-                ORDER BY r.rn
-            """)
-        else:
-            query = text(f"""
-                SELECT 
-                    r.kode AS id_upline,
-                    r.nama AS nama_upline,
-                    COUNT(DISTINCT d.kode) AS akuisisi,
-                    COALESCE(COUNT(t.kode), 0) AS jmlh_trx,
-                    COALESCE(SUM(t.harga), 0) AS omset,
-                    COALESCE(SUM(t.harga - t.harga_beli), 0) AS profit_upline
+                    r.kode, r.nama,
+                    ROW_NUMBER() OVER (ORDER BY r.kode) AS rn
                 FROM reseller r
-                LEFT JOIN reseller d ON d.kode_upline = r.kode
-                LEFT JOIN transaksi t 
-                    ON t.kode_reseller = d.kode
-                    AND t.tgl_entri >= :start_dt
-                    AND t.tgl_entri <= :end_dt
                 WHERE r.kode_upline IS NULL OR r.kode_upline = '' OR r.kode_upline = '0'
-                GROUP BY r.kode, r.nama
-                ORDER BY r.kode
-                LIMIT :limit OFFSET :offset
-            """)
+            )
+            SELECT kode, nama
+            FROM RootReseller
+            WHERE rn BETWEEN :start AND :end
+            ORDER BY rn
+        """)
+        roots = db.session.execute(root_sql, {"start": start, "end": end}).fetchall()
+        if not roots:
+            return []
 
-        results = db.session.execute(query, {
-            "start_dt": start_dt,
-            "end_dt": end_dt,
-            "offset": offset,
-            "limit": limit
-        }).fetchall()
+        root_codes = [r[0] for r in roots]
+
+        ph, params = _placeholders("root", root_codes)
+        down_sql = text(f"""
+            SELECT d.kode_upline AS id_upline, d.kode AS kode_down
+            FROM reseller d
+            WHERE d.kode_upline IN ({ph})
+        """)
+        down_rows = db.session.execute(down_sql, params).fetchall()
+
+        root_to_down = defaultdict(list)
+        for uid, dcode in down_rows:
+            root_to_down[uid].append(dcode)
+
+        all_down_codes = [d for lst in root_to_down.values() for d in lst]
+        trx_agg = defaultdict(lambda: {"jmlh_trx": 0, "omset": 0.0, "profit": 0.0})
+        if all_down_codes:
+            ph2, params2 = _placeholders("dcode", all_down_codes)
+            params2.update({"start_dt": start_dt, "end_dt": end_dt})
+            trx_sql = text(f"""
+                SELECT d.kode_upline AS id_upline,
+                       COALESCE(COUNT(t.kode), 0) AS jmlh_trx,
+                       COALESCE(SUM(t.harga), 0) AS omset,
+                       COALESCE(SUM(t.harga - t.harga_beli), 0) AS profit
+                FROM reseller d
+                LEFT JOIN transaksi t
+                  ON t.kode_reseller = d.kode
+                 AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
+                WHERE d.kode IN ({ph2})
+                GROUP BY d.kode_upline
+            """)
+            for uid, jml, oms, prof in db.session.execute(trx_sql, params2).fetchall():
+                trx_agg[uid] = {
+                    "jmlh_trx": int(jml or 0),
+                    "omset": float(oms or 0.0),
+                    "profit": float(prof or 0.0),
+                }
+
+        active_map = {}
+        acq_active_map = {}
+        daily_counts_all = _batch_daily_counts(all_down_codes, start_dt, end_dt)
+
+        acq_map = defaultdict(int)
+        if all_down_codes:
+            ph3, params3 = _placeholders("dcode", all_down_codes)
+            params3.update({"start_dt": start_dt, "end_dt": end_dt})
+            acq_sql = text(f"""
+                SELECT t.kode_reseller, COUNT(t.kode) AS total_trx
+                FROM transaksi t
+                WHERE t.kode_reseller IN ({ph3})
+                  AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
+                GROUP BY t.kode_reseller
+            """)
+            for kode_reseller, total_trx in db.session.execute(acq_sql, params3).fetchall():
+                acq_map[kode_reseller] = int(total_trx or 0)
+
+        for uid, downs in root_to_down.items():
+            act = 0
+            acq_act = 0
+            for dcode in downs:
+                d_daily = daily_counts_all.get(dcode, {})
+                if not d_daily:
+                    continue
+                has_min_daily = any(cnt >= 3 for cnt in d_daily.values())
+                if not has_min_daily:
+                    continue
+                no_gap = _has_no_15_day_gap(d_daily, start_dt, end_dt)
+                if no_gap:
+                    act += 1
+                    if acq_map.get(dcode, 0) >= 3:
+                        acq_act += 1
+            active_map[uid] = act
+            acq_active_map[uid] = acq_act
 
         hasil = []
-        for row in results:
-            insentif_detail = calculate_insentif(row.profit_upline)
-            dto = {
-                "id_upline": row.id_upline,
-                "nama_upline": row.nama_upline,
+        for kode, nama in roots:
+            akuisisi = len(root_to_down.get(kode, []))
+            agg = trx_agg.get(kode, {"jmlh_trx": 0, "omset": 0.0, "profit": 0.0})
+            insentif_detail = calculate_insentif(agg["profit"])
+            hasil.append({
+                "id_upline": kode,
+                "nama_upline": nama,
                 "periode": period,
-                "jmlh_trx": int(row.jmlh_trx or 0),
-                "jmlh_trx_aktif": _count_active_resellers([row.id_upline], start_dt, end_dt),
-                "akuisisi": int(row.akuisisi or 0),
-                "akuisisi_aktif": _count_acquisition_active_resellers([row.id_upline], start_dt, end_dt),
-                "omset": float(row.omset or 0),
-                "profit_upline": float(row.profit_upline or 0),
+                "jmlh_trx": agg["jmlh_trx"],
+                "jmlh_trx_aktif": int(active_map.get(kode, 0)),
+                "akuisisi": akuisisi,
+                "akuisisi_aktif": int(acq_active_map.get(kode, 0)),
+                "omset": agg["omset"],
+                "profit_upline": agg["profit"],
                 "insentif": insentif_detail["total_insentif"],
                 "insentif_detail": insentif_detail,
                 "start": start_dt.isoformat(timespec="seconds"),
                 "end": end_dt.isoformat(timespec="seconds"),
-            }
-            hasil.append(dto)
+            })
 
         return hasil
 
@@ -433,58 +453,71 @@ def get_reseller_summary_custom(period="month", year=None, month=None, day=None,
             "error": str(e),
             "data": []
         }
+# ======================== SELF SUMMARY ========================
 
 def get_self_summary(token, period="month", year=None, month=None, day=None, week=None):
     try:
         payload = jwt.decode(token, current_app.config["SECRET_KEY"], algorithms=["HS256"])
         kode = payload["sub"]
-        
-        # Cek user dengan raw query
-        user_query = text("SELECT kode, nama FROM reseller WHERE kode = :kode")
-        user_result = db.session.execute(user_query, {'kode': kode}).fetchone()
-        
-        if not user_result:
+
+        user_sql = text("SELECT kode, nama FROM reseller WHERE kode = :kode")
+        user = db.session.execute(user_sql, {"kode": kode}).fetchone()
+        if not user:
             return {"error": f"Reseller {kode} tidak ditemukan"}
 
         start_dt, end_dt = _get_period_range(period, year, month, day, week)
+        root_kode, root_nama = user[0], user[1]
 
-        root_kode = user_result[0]
-        root_nama = user_result[1]
-        
-        # Ambil downlines
-        downline_query = text("SELECT kode FROM reseller WHERE kode_upline = :upline_kode")
-        downline_results = db.session.execute(downline_query, {'upline_kode': root_kode}).fetchall()
-        downline_codes = [r[0] for r in downline_results]
+        # Downlines
+        dsql = text("SELECT kode FROM reseller WHERE kode_upline = :upline_kode")
+        down_rows = db.session.execute(dsql, {"upline_kode": root_kode}).fetchall()
+        down_codes = [r[0] for r in down_rows]
 
         jmlh_trx = jmlh_trx_aktif = 0
         total_omset = total_profit = 0.0
         akuisisi_aktif = 0
 
-        if downline_codes:
-            placeholders = ','.join([f':code_{i}' for i in range(len(downline_codes))])
-            params = {f'code_{i}': code for i, code in enumerate(downline_codes)}
-            params.update({'start_dt': start_dt, 'end_dt': end_dt})
-
-            trx_summary_query = text(f"""
+        if down_codes:
+            ph, params = _placeholders("dcode", down_codes)
+            params.update({"start_dt": start_dt, "end_dt": end_dt})
+            trx_sql = text(f"""
                 SELECT 
-                    COALESCE(COUNT(kode), 0) as jumlah,
-                    COALESCE(SUM(harga), 0) as omset,
-                    COALESCE(SUM(harga - harga_beli), 0) as profit
-                FROM transaksi 
-                WHERE kode_reseller IN ({placeholders})
-                    AND tgl_entri >= :start_dt
-                    AND tgl_entri <= :end_dt
+                    COALESCE(COUNT(t.kode), 0) AS jumlah,
+                    COALESCE(SUM(t.harga), 0) AS omset,
+                    COALESCE(SUM(t.harga - t.harga_beli), 0) AS profit
+                FROM transaksi t
+                WHERE t.kode_reseller IN ({ph})
+                  AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
             """)
+            jumlah, omset, profit = db.session.execute(trx_sql, params).fetchone()
+            jmlh_trx = int(jumlah or 0)
+            total_omset = float(omset or 0.0)
+            total_profit = float(profit or 0.0)
 
-            trx_result = db.session.execute(trx_summary_query, params).fetchone()
-            jmlh_trx = int(trx_result[0] or 0)
-            total_omset = float(trx_result[1] or 0)
-            total_profit = float(trx_result[2] or 0)
+            # Batch activity
+            daily_counts = _batch_daily_counts(down_codes, start_dt, end_dt)
+            # total transaksi per reseller (untuk acq >= 3)
+            acq_map = defaultdict(int)
+            acq_sql = text(f"""
+                SELECT t.kode_reseller, COUNT(t.kode) AS total_trx
+                FROM transaksi t
+                WHERE t.kode_reseller IN ({ph})
+                  AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
+                GROUP BY t.kode_reseller
+            """)
+            for kode_reseller, total_trx in db.session.execute(acq_sql, params).fetchall():
+                acq_map[kode_reseller] = int(total_trx or 0)
 
-            jmlh_trx_aktif = _count_active_resellers(downline_codes, start_dt, end_dt)
-            akuisisi_aktif = _count_acquisition_active_resellers(downline_codes, start_dt, end_dt)
+            for dcode in down_codes:
+                d = daily_counts.get(dcode, {})
+                if not d:
+                    continue
+                if any(c >= 3 for c in d.values()) and _has_no_15_day_gap(d, start_dt, end_dt):
+                    jmlh_trx_aktif += 1
+                    if acq_map.get(dcode, 0) >= 3:
+                        akuisisi_aktif += 1
 
-        akuisisi = len(downline_codes)
+        akuisisi = len(down_codes)
         insentif_detail = calculate_insentif(total_profit)
 
         return {
@@ -507,75 +540,128 @@ def get_self_summary(token, period="month", year=None, month=None, day=None, wee
         print(f"Error in get_self_summary: {str(e)}")
         return {"error": str(e)}
 
-def get_summary_by_week(year, month, page: int = 1, per_page: int = 50):
-    """Ambil summary per minggu untuk semua upline (support MySQL & MSSQL) dengan pagination."""
+# ======================== SUMMARY PER MINGGU ========================
+
+def get_summary_by_week(year, month, page: int = 1, limit: int = 50):
+    """Summary per minggu untuk semua upline dengan pagination SQL-native; batch untuk aktivitas."""
     try:
         month_cal = calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
-        results = []
+        offset = (page - 1) * limit
 
-        # Ambil semua root upline
-        root_query = text("""
-            SELECT kode, nama 
-            FROM reseller 
-            WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
-            ORDER BY kode
+        # Roots paginated
+        root_sql = text(f"""
+            WITH RootReseller AS (
+                SELECT kode,
+                    nama,
+                    ROW_NUMBER() OVER (ORDER BY kode) AS rn
+                FROM reseller
+                WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+            )
+            SELECT kode, nama
+            FROM RootReseller
+            WHERE rn BETWEEN :rn_start AND :rn_end
+            ORDER BY rn
         """)
-        all_roots = db.session.execute(root_query).fetchall()
 
-        # Pagination di Python
-        total_roots = len(all_roots)
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        root_results = all_roots[start_idx:end_idx]
+        rn_start = offset + 1
+        rn_end = offset + limit
 
+        roots = db.session.execute(root_sql, {
+            "rn_start": rn_start,
+            "rn_end": rn_end
+        }).fetchall()
+
+        count_sql = text("""
+            SELECT COUNT(*)
+            FROM reseller
+            WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+        """)
+        total_roots = int(db.session.execute(count_sql).scalar() or 0)
+
+        if not roots:
+            return {"page": page, "limit": limit, "total_roots": total_roots, "total_pages": (total_roots + limit - 1) // limit, "data": []}
+
+        root_codes = [r[0] for r in roots]
+        # Downlines untuk roots ini
+        ph, params = _placeholders("root", root_codes)
+        down_sql = text(f"""
+            SELECT d.kode_upline AS id_upline, d.kode AS kode_down, d.nama AS nama_down
+            FROM reseller d
+            WHERE d.kode_upline IN ({ph})
+        """)
+        down_rows = db.session.execute(down_sql, params).fetchall()
+
+        root_to_down = defaultdict(list)
+        for uid, dcode, _ in down_rows:
+            root_to_down[uid].append(dcode)
+
+        data = []
         for week_num, week_days in enumerate(month_cal, start=1):
             start_dt = datetime.combine(week_days[0], datetime.min.time())
             end_dt = datetime.combine(week_days[-1], datetime.max.time())
 
-            for root_kode, root_nama in root_results:
-                # Ambil downlines
-                downline_query = text("SELECT kode FROM reseller WHERE kode_upline = :upline_kode")
-                downline_codes = [r[0] for r in db.session.execute(downline_query, {'upline_kode': root_kode}).fetchall()]
+            # Agregasi per upline untuk minggu ini
+            all_down_codes = [d for lst in root_to_down.values() for d in lst]
+            trx_agg = defaultdict(lambda: {"jmlh_trx": 0, "omset": 0.0, "profit": 0.0})
+            if all_down_codes:
+                ph2, params2 = _placeholders("dcode", all_down_codes)
+                params2.update({"start_dt": start_dt, "end_dt": end_dt})
+                trx_sql = text(f"""
+                    SELECT d.kode_upline AS id_upline,
+                           COALESCE(COUNT(t.kode), 0) AS jmlh_trx,
+                           COALESCE(SUM(t.harga), 0) AS omset,
+                           COALESCE(SUM(t.harga - t.harga_beli), 0) AS profit
+                    FROM reseller d
+                    LEFT JOIN transaksi t
+                      ON t.kode_reseller = d.kode
+                     AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
+                    WHERE d.kode IN ({ph2})
+                    GROUP BY d.kode_upline
+                """)
+                for uid, jml, oms, prof in db.session.execute(trx_sql, params2).fetchall():
+                    trx_agg[uid] = {"jmlh_trx": int(jml or 0), "omset": float(oms or 0.0), "profit": float(prof or 0.0)}
 
-                jmlh_trx = jmlh_trx_aktif = akuisisi_aktif = 0
-                total_omset = total_profit = 0.0
+            # Batch activity untuk minggu ini
+            daily_counts = _batch_daily_counts(all_down_codes, start_dt, end_dt)
+            # total trx per reseller minggu ini
+            acq_map = defaultdict(int)
+            if all_down_codes:
+                acq_sql = text(f"""
+                    SELECT t.kode_reseller, COUNT(t.kode) AS total_trx
+                    FROM transaksi t
+                    WHERE t.kode_reseller IN ({ph2})
+                      AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
+                    GROUP BY t.kode_reseller
+                """)
+                for kode_reseller, total_trx in db.session.execute(acq_sql, params2).fetchall():
+                    acq_map[kode_reseller] = int(total_trx or 0)
 
-                if downline_codes:
-                    placeholders = ','.join([f':code_{i}' for i in range(len(downline_codes))])
-                    params = {f'code_{i}': code for i, code in enumerate(downline_codes)}
-                    params.update({'start_dt': start_dt, 'end_dt': end_dt})
+            for root_kode, root_nama in roots:
+                downs = root_to_down.get(root_kode, [])
+                jmlh_trx_aktif = 0
+                akuisisi_aktif = 0
+                for dcode in downs:
+                    d = daily_counts.get(dcode, {})
+                    if not d:
+                        continue
+                    if any(c >= 3 for c in d.values()) and _has_no_15_day_gap(d, start_dt, end_dt):
+                        jmlh_trx_aktif += 1
+                        if acq_map.get(dcode, 0) >= 3:
+                            akuisisi_aktif += 1
 
-                    trx_summary_query = text(f"""
-                        SELECT 
-                            COALESCE(COUNT(*), 0) AS jumlah,
-                            COALESCE(SUM(harga), 0) AS omset,
-                            COALESCE(SUM(harga - harga_beli), 0) AS profit
-                        FROM transaksi
-                        WHERE kode_reseller IN ({placeholders})
-                          AND tgl_entri BETWEEN :start_dt AND :end_dt
-                    """)
+                agg = trx_agg.get(root_kode, {"jmlh_trx": 0, "omset": 0.0, "profit": 0.0})
+                insentif_detail = calculate_insentif(agg["profit"])
 
-                    trx_result = db.session.execute(trx_summary_query, params).fetchone()
-                    jmlh_trx = int(trx_result[0] or 0)
-                    total_omset = float(trx_result[1] or 0)
-                    total_profit = float(trx_result[2] or 0)
-
-                    jmlh_trx_aktif = _count_active_resellers(downline_codes, start_dt, end_dt)
-                    akuisisi_aktif = _count_acquisition_active_resellers(downline_codes, start_dt, end_dt)
-
-                akuisisi = len(downline_codes)
-                insentif_detail = calculate_insentif(total_profit)
-
-                results.append({
+                data.append({
                     "id_upline": root_kode,
                     "nama_upline": root_nama,
                     "week": week_num,
-                    "jmlh_trx": jmlh_trx,
+                    "jmlh_trx": agg["jmlh_trx"],
                     "jmlh_trx_aktif": int(jmlh_trx_aktif),
-                    "akuisisi": akuisisi,
+                    "akuisisi": len(downs),
                     "akuisisi_aktif": int(akuisisi_aktif),
-                    "omset": total_omset,
-                    "profit_upline": total_profit,
+                    "omset": agg["omset"],
+                    "profit_upline": agg["profit"],
                     "insentif": float(insentif_detail["total_insentif"]),
                     "insentif_detail": insentif_detail,
                     "start": start_dt.isoformat(timespec="seconds"),
@@ -584,33 +670,33 @@ def get_summary_by_week(year, month, page: int = 1, per_page: int = 50):
 
         return {
             "page": page,
-            "per_page": per_page,
+            "limit": limit,
             "total_roots": total_roots,
-            "total_pages": (total_roots + per_page - 1) // per_page,
-            "data": results
+            "total_pages": (total_roots + limit - 1) // limit,
+            "data": data
         }
 
     except Exception as e:
         print(f"Error in get_summary_by_week: {str(e)}")
-        return {"page": page, "per_page": per_page, "total_roots": 0, "total_pages": 0, "data": []}
+        return {"page": page, "limit": limit, "total_roots": 0, "total_pages": 0, "data": []}
 
-def compare_months(year1, month1, year2, month2):
-    """Bandingkan summary bulan1 vs bulan2 (per minggu, per upline)"""
+# ======================== COMPARE MONTHS ========================
+
+def compare_months(year1, month1, year2, month2, page: int = 1, limit: int = 50):
+    """Bandingkan summary bulan1 vs bulan2 (per minggu, per upline) dengan pagination"""
     try:
-        data1 = get_summary_by_week(year1, month1)
-        data2 = get_summary_by_week(year2, month2)
+        result1 = get_summary_by_week(year1, month1, page=page, limit=limit)
+        result2 = get_summary_by_week(year2, month2, page=page, limit=limit)
+
+        data1 = result1.get("data", []) if isinstance(result1, dict) else result1
+        data2 = result2.get("data", []) if isinstance(result2, dict) else result2
 
         comparison = {}
-        
-        # Process data1 first
+
         for d in data1:
             key = (d["id_upline"], d["week"])
             comparison[key] = {
-                "upline": {
-                    "id": d["id_upline"],
-                    "nama": d["nama_upline"],
-                    "week": d["week"]
-                },
+                "upline": {"id": d["id_upline"], "nama": d["nama_upline"], "week": d["week"]},
                 "month1": {
                     "jmlh_trx": d["jmlh_trx"],
                     "jmlh_trx_aktif": d["jmlh_trx_aktif"],
@@ -633,10 +719,9 @@ def compare_months(year1, month1, year2, month2):
                 },
             }
 
-        # Process data2
         for d in data2:
             key = (d["id_upline"], d["week"])
-            month2_data = {
+            m2 = {
                 "jmlh_trx": d["jmlh_trx"],
                 "jmlh_trx_aktif": d["jmlh_trx_aktif"],
                 "akuisisi": d.get("akuisisi", 0),
@@ -646,71 +731,73 @@ def compare_months(year1, month1, year2, month2):
                 "insentif": d.get("insentif", 0),
                 "insentif_detail": d.get("insentif_detail", {}),
             }
-            
             if key not in comparison:
                 comparison[key] = {
-                    "upline": {
-                        "id": d["id_upline"],
-                        "nama": d["nama_upline"],
-                        "week": d["week"]
-                    },
+                    "upline": {"id": d["id_upline"], "nama": d["nama_upline"], "week": d["week"]},
                     "month1": {
-                        "jmlh_trx": 0,
-                        "jmlh_trx_aktif": 0,
-                        "akuisisi": 0,
-                        "akuisisi_aktif": 0,
-                        "omset": 0,
-                        "profit": 0,
-                        "insentif": 0,
-                        "insentif_detail": {},
+                        "jmlh_trx": 0, "jmlh_trx_aktif": 0, "akuisisi": 0, "akuisisi_aktif": 0,
+                        "omset": 0, "profit": 0, "insentif": 0, "insentif_detail": {}
                     },
-                    "month2": month2_data,
+                    "month2": m2,
                 }
             else:
-                comparison[key]["month2"] = month2_data
+                comparison[key]["month2"] = m2
 
-        return list(comparison.values())
+        return {
+            "status": "success",
+            "message": "Data perbandingan bulanan berhasil diambil",
+            "page": page,
+            "per_page": limit,
+            "total_roots": max(result1.get("total_roots", 0), result2.get("total_roots", 0)),
+            "total_pages": max(result1.get("total_pages", 0), result2.get("total_pages", 0)),
+            "data": list(comparison.values())
+        }
+
     except Exception as e:
         print(f"Error in compare_months: {str(e)}")
-        return []
+        return {
+            "status": "error",
+            "message": "Gagal membandingkan summary",
+            "error": str(e),
+            "page": page,
+            "limit": limit,
+            "total_roots": 0,
+            "total_pages": 0,
+            "data": []
+        }
 
-# ======================== UTILITY FUNCTIONS ========================
+# ======================== DEBUG UTILS ========================
 
 def get_reseller_activity_detail(reseller_code, start_dt, end_dt):
-    """Fungsi untuk debugging - melihat detail aktivitas reseller"""
+    """Debug detail aktivitas reseller berdasarkan daily aggregation (dialect-aware)."""
     try:
-        daily_trx_query = text("""
+        date_col = _date_expr("t.tgl_entri")
+        sql = text(f"""
             SELECT 
-                DATE(tgl_entri) as trx_date,
-                COUNT(kode) as daily_count
-            FROM transaksi 
-            WHERE kode_reseller = :reseller_code
-                AND tgl_entri >= :start_dt
-                AND tgl_entri <= :end_dt
-            GROUP BY DATE(tgl_entri)
-            ORDER BY trx_date
+                {date_col} AS trx_date,
+                COUNT(t.kode) AS daily_count
+            FROM transaksi t
+            WHERE t.kode_reseller = :reseller_code
+              AND t.tgl_entri >= :start_dt AND t.tgl_entri <= :end_dt
+            GROUP BY {date_col}
+            ORDER BY {date_col}
         """)
-        
-        trx_results = db.session.execute(daily_trx_query, {
-            'reseller_code': reseller_code,
-            'start_dt': start_dt,
-            'end_dt': end_dt
+        rows = db.session.execute(sql, {
+            "reseller_code": reseller_code,
+            "start_dt": start_dt,
+            "end_dt": end_dt
         }).fetchall()
-        
-        daily_transactions = {row[0]: row[1] for row in trx_results}
+
+        daily_transactions = {row[0]: row[1] for row in rows}
         has_min_daily = any(count >= 3 for count in daily_transactions.values())
         has_no_gap = _has_no_15_day_gap(daily_transactions, start_dt, end_dt)
-        
         return {
             "reseller_code": reseller_code,
-            "transaction_dates": [(str(row[0]), row[1]) for row in trx_results],
+            "transaction_dates": [(str(r[0]), r[1]) for r in rows],
             "has_min_daily_trx": has_min_daily,
             "has_no_15_day_gap": has_no_gap,
             "is_active": has_min_daily and has_no_gap
         }
     except Exception as e:
         print(f"Error in get_reseller_activity_detail: {str(e)}")
-        return {
-            "reseller_code": reseller_code,
-            "error": str(e)
-        }
+        return {"reseller_code": reseller_code, "error": str(e)}
