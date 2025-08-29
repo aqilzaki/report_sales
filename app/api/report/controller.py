@@ -19,25 +19,25 @@ def get_reseller_hierarchy_with_profit(page=1, limit=10):
 
         offset = (page - 1) * limit
 
-        # Query root reseller (pagination sesuai dialect)
+        # Query root reseller (pagination sesuai dialect) - DIPERBAIKI
         if dialect in ["mssql", "microsoft sql server"]:
-            root_query = text(f"""
+            root_query = text("""
                 SELECT kode, nama, kode_upline
                 FROM reseller
                 WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
                 ORDER BY kode
-                OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY
+                OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
             """)
         else:  # MySQL, PostgreSQL, SQLite
-            root_query = text(f"""
+            root_query = text("""
                 SELECT kode, nama, kode_upline
                 FROM reseller
                 WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
                 ORDER BY kode
-                LIMIT {limit} OFFSET {offset}
+                LIMIT :limit OFFSET :offset
             """)
 
-        root_results = db.session.execute(root_query).fetchall()
+        root_results = db.session.execute(root_query, {"offset": offset, "limit": limit}).fetchall()
         print(f"Found {len(root_results)} potential roots")
 
         if not root_results:
@@ -112,6 +112,7 @@ def get_reseller_hierarchy_with_profit(page=1, limit=10):
         import traceback
         traceback.print_exc()
         return {"page": page, "limit": limit, "total": 0, "data": []}
+
 # ======================== PERIOD FILTER ========================
 
 def _get_period_range(period: str, year=None, month=None, day=None, week=None):
@@ -224,22 +225,35 @@ def _count_active_resellers(reseller_codes, start_dt, end_dt):
         return 0
     
     active_count = 0
+    dialect = db.engine.dialect.name.lower()
     
     try:
         for reseller_code in reseller_codes:
-            # Query dengan raw SQL untuk lebih aman
-            daily_trx_query = text("""
-              SELECT 
-                CAST(tgl_entri AS DATE) as trx_date,
-                COUNT(kode) as daily_count
-                FROM transaksi 
-                WHERE kode_reseller = :reseller_code
-                    AND tgl_entri >= :start_dt
-                    AND tgl_entri <= :end_dt
-                GROUP BY CAST(tgl_entri AS DATE)
-
-
-            """)
+            # Query dengan raw SQL disesuaikan dialect - DIPERBAIKI
+            if dialect in ["mssql", "microsoft sql server"]:
+                daily_trx_query = text("""
+                    SELECT 
+                        CAST(tgl_entri AS DATE) as trx_date,
+                        COUNT(kode) as daily_count
+                    FROM transaksi 
+                    WHERE kode_reseller = :reseller_code
+                        AND tgl_entri >= :start_dt
+                        AND tgl_entri <= :end_dt
+                    GROUP BY CAST(tgl_entri AS DATE)
+                    ORDER BY CAST(tgl_entri AS DATE)
+                """)
+            else:  # MySQL, PostgreSQL, SQLite
+                daily_trx_query = text("""
+                    SELECT 
+                        DATE(tgl_entri) as trx_date,
+                        COUNT(kode) as daily_count
+                    FROM transaksi 
+                    WHERE kode_reseller = :reseller_code
+                        AND tgl_entri >= :start_dt
+                        AND tgl_entri <= :end_dt
+                    GROUP BY DATE(tgl_entri)
+                    ORDER BY DATE(tgl_entri)
+                """)
             
             trx_results = db.session.execute(daily_trx_query, {
                 'reseller_code': reseller_code,
@@ -347,8 +361,9 @@ def get_reseller_summary_custom(period="month", year=None, month=None, day=None,
         dialect = db.engine.dialect.name.lower()
         print(f"Database dialect: {dialect}")
 
-        if dialect == "mssql":
-            query = text(f"""
+        # Query disesuaikan dialect - SUDAH BENAR, TIDAK DIUBAH
+        if dialect in ["mssql", "microsoft sql server"]:
+            query = text("""
                 WITH root_reseller AS (
                     SELECT 
                         kode, nama,
@@ -374,7 +389,7 @@ def get_reseller_summary_custom(period="month", year=None, month=None, day=None,
                 ORDER BY r.rn
             """)
         else:
-            query = text(f"""
+            query = text("""
                 SELECT 
                     r.kode AS id_upline,
                     r.nama AS nama_upline,
@@ -514,19 +529,19 @@ def get_summary_by_week(year, month, page: int = 1, limit: int = 50):
         # Hitung offset
         offset = (page - 1) * limit
 
-        # Cek dialect (mysql / mssql)
+        # Cek dialect (mysql / mssql) - DIPERBAIKI
         dialect = db.engine.dialect.name.lower()
 
-        if dialect == "mysql":
-            root_query = text(f"""
+        if dialect in ["mysql"]:
+            root_query = text("""
                 SELECT kode, nama
                 FROM reseller
                 WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
                 ORDER BY kode
                 LIMIT :limit OFFSET :offset
             """)
-        elif dialect in ["mssql", "mssql+pymssql", "mssql+pyodbc"]:
-            root_query = text(f"""
+        elif dialect in ["mssql", "microsoft sql server"]:
+            root_query = text("""
                 SELECT kode, nama
                 FROM reseller
                 WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
@@ -534,7 +549,14 @@ def get_summary_by_week(year, month, page: int = 1, limit: int = 50):
                 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
             """)
         else:
-            raise Exception(f"Unsupported dialect: {dialect}")
+            # Default untuk dialect lain (PostgreSQL, SQLite, dll)
+            root_query = text("""
+                SELECT kode, nama
+                FROM reseller
+                WHERE kode_upline IS NULL OR kode_upline = '' OR kode_upline = '0'
+                ORDER BY kode
+                LIMIT :limit OFFSET :offset
+            """)
 
         root_results = db.session.execute(root_query, {"limit": limit, "offset": offset}).fetchall()
 
@@ -570,7 +592,8 @@ def get_summary_by_week(year, month, page: int = 1, limit: int = 50):
                             COALESCE(SUM(harga - harga_beli), 0) AS profit
                         FROM transaksi
                         WHERE kode_reseller IN ({placeholders})
-                          AND tgl_entri BETWEEN :start_dt AND :end_dt
+                          AND tgl_entri >= :start_dt 
+                          AND tgl_entri <= :end_dt
                     """)
 
                     trx_result = db.session.execute(trx_summary_query, params).fetchone()
@@ -696,7 +719,7 @@ def compare_months(year1, month1, year2, month2, page: int = 1, limit: int = 50)
             "status": "success",
             "message": f"Data perbandingan bulanan berhasil diambil",
             "page": page,
-            "per_page": limit, # Ubah 'limit' menjadi 'per_page'
+            "per_page": limit,
             "total_roots": max(result1.get("total_roots", 0), result2.get("total_roots", 0)),
             "total_pages": max(result1.get("total_pages", 0), result2.get("total_pages", 0)),
             "data": list(comparison.values())
@@ -720,17 +743,33 @@ def compare_months(year1, month1, year2, month2, page: int = 1, limit: int = 50)
 def get_reseller_activity_detail(reseller_code, start_dt, end_dt):
     """Fungsi untuk debugging - melihat detail aktivitas reseller"""
     try:
-        daily_trx_query = text("""
-            SELECT 
-                DATE(tgl_entri) as trx_date,
-                COUNT(kode) as daily_count
-            FROM transaksi 
-            WHERE kode_reseller = :reseller_code
-                AND tgl_entri >= :start_dt
-                AND tgl_entri <= :end_dt
-            GROUP BY DATE(tgl_entri)
-            ORDER BY trx_date
-        """)
+        dialect = db.engine.dialect.name.lower()
+        
+        # Query disesuaikan dialect - DIPERBAIKI
+        if dialect in ["mssql", "microsoft sql server"]:
+            daily_trx_query = text("""
+                SELECT 
+                    CAST(tgl_entri AS DATE) as trx_date,
+                    COUNT(kode) as daily_count
+                FROM transaksi 
+                WHERE kode_reseller = :reseller_code
+                    AND tgl_entri >= :start_dt
+                    AND tgl_entri <= :end_dt
+                GROUP BY CAST(tgl_entri AS DATE)
+                ORDER BY CAST(tgl_entri AS DATE)
+            """)
+        else:  # MySQL, PostgreSQL, SQLite
+            daily_trx_query = text("""
+                SELECT 
+                    DATE(tgl_entri) as trx_date,
+                    COUNT(kode) as daily_count
+                FROM transaksi 
+                WHERE kode_reseller = :reseller_code
+                    AND tgl_entri >= :start_dt
+                    AND tgl_entri <= :end_dt
+                GROUP BY DATE(tgl_entri)
+                ORDER BY DATE(tgl_entri)
+            """)
         
         trx_results = db.session.execute(daily_trx_query, {
             'reseller_code': reseller_code,
